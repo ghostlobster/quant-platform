@@ -7,8 +7,8 @@ Configure via environment variables:
   IBKR_PAPER      — true → port 7497 (paper), false → port 7496 (live); default: true
 Safe no-op when credentials are absent or ib_insync is not installed.
 """
-import os
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 

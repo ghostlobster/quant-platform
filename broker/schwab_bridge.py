@@ -9,8 +9,8 @@ Configure via environment variables:
   SCHWAB_SANDBOX        — sandbox mode guard flag (default: true)
 Safe no-op when credentials are absent, token file is missing, or schwab-py is not installed.
 """
-import os
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 
