@@ -132,13 +132,13 @@ def render() -> None:
         ms2.metric("Volatility",      f"{max_sharpe.expected_volatility * 100:.1f}%")
         ms3.metric("Sharpe Ratio",    f"{max_sharpe.sharpe_ratio:.2f}")
         weights_df = pd.DataFrame(
-            [{"Ticker": k, "Weight": f"{v * 100:.1f}%", "Allocation %": v * 100}
+            [{"Ticker": k, "Allocation %": v * 100}
              for k, v in sorted(max_sharpe.weights.items(), key=lambda x: -x[1])]
         )
         st.dataframe(
-            weights_df[["Ticker", "Weight"]].style.bar(
-                subset=["Weight"], color="#26a69a"
-            ),
+            weights_df.style.bar(
+                subset=["Allocation %"], color="#26a69a"
+            ).format({"Allocation %": "{:.1f}%"}),
             use_container_width=True, hide_index=True,
         )
 
