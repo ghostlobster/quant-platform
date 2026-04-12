@@ -1,7 +1,7 @@
 """Value at Risk calculations — Historical and Parametric."""
+
 import numpy as np
 import pandas as pd
-from typing import Optional
 
 
 def _norm_ppf(p: float) -> float:

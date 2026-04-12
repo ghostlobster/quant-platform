@@ -1,8 +1,7 @@
 """Portfolio correlation analysis."""
+
 import pandas as pd
-import numpy as np
 import plotly.graph_objects as go
-from typing import List, Optional
 
 
 def compute_correlation_matrix(price_data: dict[str, pd.Series]) -> pd.DataFrame:

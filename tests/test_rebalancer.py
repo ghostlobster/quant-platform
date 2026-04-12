@@ -1,10 +1,11 @@
-import sys
 import os
+import sys
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 import pytest
-from strategies.rebalancer import compute_rebalance_trades, rebalance_summary, RebalanceTrade
 
+from strategies.rebalancer import compute_rebalance_trades, rebalance_summary
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 

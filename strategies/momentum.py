@@ -1,8 +1,9 @@
 """Momentum and trend-following strategies."""
-import pandas as pd
+from dataclasses import dataclass
+from typing import List
+
 import numpy as np
-from dataclasses import dataclass, field
-from typing import Optional, List
+import pandas as pd
 
 
 @dataclass

@@ -1,10 +1,12 @@
 """Walk-forward backtesting — rolling train/test windows."""
 import logging
-import pandas as pd
-import numpy as np
 from dataclasses import dataclass, field
-from typing import List, Optional
-from backtester.engine import run_backtest, BacktestResult
+from typing import List
+
+import numpy as np
+import pandas as pd
+
+from backtester.engine import BacktestResult, run_backtest
 
 logger = logging.getLogger(__name__)
 

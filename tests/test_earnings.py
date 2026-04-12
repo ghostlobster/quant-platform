@@ -1,9 +1,12 @@
-import pytest
-import sys, os
+import os
+import sys
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
+
 import pandas as pd
+
 from data.earnings import get_earnings_dates, get_next_earnings_date
 
 

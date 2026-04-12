@@ -1,15 +1,15 @@
 """
 pages/chart.py — Chart & price analysis tab.
 """
-import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
+import streamlit as st
 from plotly.subplots import make_subplots
 
-from data.fetcher import fetch_ohlcv, fetch_latest_price
+from analysis.regime import get_live_regime
+from data.fetcher import fetch_latest_price, fetch_ohlcv
 from data.watchlist import add_ticker, get_watchlist, is_in_watchlist, remove_ticker
 from strategies.indicators import add_all, generate_signals
-from analysis.regime import get_live_regime
 
 _REGIME_ICON = {
     "trending_bull":  "🟢",

@@ -6,12 +6,10 @@ the real package to be installed.
 """
 import sys
 import types
-import importlib
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Helpers to (re)load ccxt_bridge with a fake ccxt module injected

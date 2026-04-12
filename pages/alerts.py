@@ -9,12 +9,12 @@ import streamlit as st
 from data.fetcher import fetch_latest_price, fetch_ohlcv
 from data.indicators import compute_rsi
 from scheduler.alerts import (
-    add_alert,
-    get_alerts,
-    delete_alert,
-    toggle_alert,
-    check_alerts,
     ALERT_TYPES,
+    add_alert,
+    check_alerts,
+    delete_alert,
+    get_alerts,
+    toggle_alert,
 )
 
 logger = logging.getLogger(__name__)
