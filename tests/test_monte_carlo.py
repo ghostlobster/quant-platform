@@ -6,7 +6,9 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from backtester.monte_carlo import MonteCarloResult, run_monte_carlo
+import plotly.graph_objects as go
+
+from backtester.monte_carlo import MonteCarloResult, build_monte_carlo_chart, run_monte_carlo
 
 
 def make_returns(n=252, seed=1):
@@ -33,3 +35,24 @@ def test_short_returns_empty_result():
     r = pd.Series([0.01, -0.02])
     mc = run_monte_carlo(r)
     assert mc.median_return == 0
+
+
+# --- build_monte_carlo_chart ---
+
+def test_build_chart_returns_figure():
+    r = make_returns()
+    fig = build_monte_carlo_chart(r, n_simulations=50, n_periods=60)
+    assert isinstance(fig, go.Figure)
+    assert len(fig.data) > 0
+
+
+def test_build_chart_empty_returns_empty_figure():
+    fig = build_monte_carlo_chart(pd.Series([], dtype=float))
+    assert isinstance(fig, go.Figure)
+    assert len(fig.data) == 0
+
+
+def test_build_chart_too_short_returns_empty_figure():
+    fig = build_monte_carlo_chart(pd.Series([0.01, -0.02]))
+    assert isinstance(fig, go.Figure)
+    assert len(fig.data) == 0
