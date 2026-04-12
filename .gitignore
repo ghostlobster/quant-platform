@@ -1,0 +1,49 @@
+# Secrets — never commit
+.env
+.env.*
+*.env
+*.pem
+*.key
+secrets.toml
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.eggs/
+venv/
+.venv/
+env/
+.venv
+*.egg
+
+# Data / DB
+*.db
+*.sqlite
+*.sqlite3
+data/cache/
+
+# Logs
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Claude Code local settings (machine-specific paths, not for sharing)
+.claude/settings.local.json
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
