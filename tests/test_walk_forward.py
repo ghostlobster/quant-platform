@@ -6,7 +6,9 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from backtester.walk_forward import WalkForwardResult, walk_forward
+from unittest.mock import patch
+import plotly.graph_objects as go
+from backtester.walk_forward import walk_forward, build_walk_forward_chart, WalkForwardResult
 
 
 def make_ohlcv(n=300, seed=7):
@@ -40,3 +42,39 @@ def test_short_df_returns_empty():
     df = make_ohlcv(20)
     wf = walk_forward(df, train_periods=60, test_periods=60, step=30)
     assert wf.total_trades == 0
+
+
+def test_walk_forward_segment_exception_skipped():
+    """run_backtest raising in one segment must not abort the whole walk."""
+    df = make_ohlcv(300)
+    call_count = {"n": 0}
+
+    def occasionally_fail(segment, **kwargs):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            raise ValueError("injected failure")
+        from backtester.engine import run_backtest as _real
+        return _real(segment, **kwargs)
+
+    with patch("backtester.walk_forward.run_backtest", side_effect=occasionally_fail):
+        wf = walk_forward(df, strategy="sma_crossover", train_periods=60, test_periods=60, step=30)
+
+    # At least one successful window despite the first failure
+    assert isinstance(wf, WalkForwardResult)
+    assert len(wf.windows) >= 1
+
+
+# --- build_walk_forward_chart ---
+
+def test_build_chart_empty_returns_empty_figure():
+    fig = build_walk_forward_chart(WalkForwardResult())
+    assert isinstance(fig, go.Figure)
+    assert len(fig.data) == 0
+
+
+def test_build_chart_with_results():
+    df = make_ohlcv(300)
+    wf = walk_forward(df, strategy="sma_crossover", train_periods=60, test_periods=60, step=30)
+    fig = build_walk_forward_chart(wf)
+    assert isinstance(fig, go.Figure)
+    assert len(fig.data) > 0
