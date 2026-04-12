@@ -75,6 +75,8 @@ jobs:
 
       # Integration tests — runs tests marked @pytest.mark.integration
       # Currently 0 tests are marked; this step scaffolds the split for future use.
+      # Exit code 5 means "no tests collected", which is expected until integration
+      # tests are added — treat it as success.
       - name: Run integration tests
         continue-on-error: false
         run: |
@@ -82,7 +84,8 @@ jobs:
             --cov=. \
             --cov-report=xml:coverage-integration.xml \
             --cov-append \
-            --junitxml=test-results-integration.xml
+            --junitxml=test-results-integration.xml \
+          || [ $? -eq 5 ]
 
       - name: Upload coverage and test results
         uses: actions/upload-artifact@v4
