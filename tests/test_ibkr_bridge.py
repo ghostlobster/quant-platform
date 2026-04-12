@@ -6,11 +6,9 @@ package to be installed. Uses the same reload pattern as test_ccxt_bridge.py.
 """
 import sys
 import types
-import importlib
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Helpers to (re)load ibkr_bridge with a fake ib_insync module injected

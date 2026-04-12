@@ -6,11 +6,9 @@ the real package to be installed. Uses the same reload pattern as test_ccxt_brid
 """
 import sys
 import types
-import json
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Helpers to (re)load schwab_bridge with a fake schwab module injected
