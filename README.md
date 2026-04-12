@@ -14,6 +14,15 @@ cp .env.example .env   # add your API keys
 bash run.sh
 ```
 
+## Developer Setup
+
+Configure your git author identity in the local repo:
+
+```bash
+git config user.name "Your Name"
+git config user.email "your@email.com"
+```
+
 The app will be available at **http://localhost:8501**.
 
 ## Features
