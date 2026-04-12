@@ -7,8 +7,10 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from unittest.mock import patch
+
 import plotly.graph_objects as go
-from backtester.walk_forward import walk_forward, build_walk_forward_chart, WalkForwardResult
+
+from backtester.walk_forward import WalkForwardResult, build_walk_forward_chart, walk_forward
 
 
 def make_ohlcv(n=300, seed=7):

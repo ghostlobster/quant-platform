@@ -8,8 +8,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from unittest.mock import MagicMock, patch
 
 from broker.alpaca_bridge import (
-    get_account, get_positions, place_market_order, cancel_all_orders,
-    is_market_open, AlpacaOrder, _is_configured,
+    cancel_all_orders,
+    get_account,
+    get_positions,
+    is_market_open,
+    place_market_order,
 )
 
 

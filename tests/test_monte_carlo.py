@@ -6,8 +6,9 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from backtester.monte_carlo import run_monte_carlo, build_monte_carlo_chart, MonteCarloResult
 import plotly.graph_objects as go
+
+from backtester.monte_carlo import MonteCarloResult, build_monte_carlo_chart, run_monte_carlo
 
 
 def make_returns(n=252, seed=1):

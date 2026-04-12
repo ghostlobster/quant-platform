@@ -1,10 +1,17 @@
 import os
 import sys
 
+import pytest
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from unittest.mock import patch, MagicMock
-from data.sentiment import score_text, score_headlines, get_ticker_sentiment, SentimentScore, _lexicon_score
+from unittest.mock import MagicMock, patch
+
+from data.sentiment import (
+    get_ticker_sentiment,
+    score_headlines,
+    score_text,
+)
 
 
 def test_positive_headline():
