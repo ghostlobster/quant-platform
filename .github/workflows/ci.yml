@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Test (Python 3.11)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest-cov
+
+      # Unit tests — excludes anything marked @pytest.mark.integration
+      - name: Run unit tests
+        continue-on-error: false
+        run: |
+          pytest tests/ -v -m "not integration" \
+            --cov=. \
+            --cov-report=xml:coverage.xml \
+            --cov-report=term-missing \
+            --junitxml=test-results-unit.xml
+
+      # Integration tests — runs tests marked @pytest.mark.integration
+      # Currently 0 tests are marked; this step scaffolds the split for future use.
+      - name: Run integration tests
+        continue-on-error: false
+        run: |
+          pytest tests/ -v -m "integration" \
+            --cov=. \
+            --cov-report=xml:coverage-integration.xml \
+            --cov-append \
+            --junitxml=test-results-integration.xml
+
+      - name: Upload coverage and test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-report
+          path: |
+            coverage.xml
+            coverage-integration.xml
+            test-results-unit.xml
+            test-results-integration.xml
+
+      - name: Post coverage summary comment
+        uses: MishaKav/pytest-coverage-comment@main
+        if: github.event_name == 'pull_request'
+        with:
+          pytest-xml-coverage-path: ./coverage.xml
+          junitxml-path: ./test-results-unit.xml
+          title: "Coverage Report"
+          badge-title: "Coverage"
+          hide-badge: false
+          hide-report: false
+          create-new-comment: false
+          hide-comment: false
+          report-only-changed-files: false
