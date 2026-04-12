@@ -3,11 +3,11 @@ News sentiment scoring using keyword-based VADER-style approach.
 Falls back gracefully if transformers/VADER not installed.
 """
 import re
-import logging
+import structlog
 from dataclasses import dataclass, field
 from typing import List, Optional
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 # Simple financial sentiment lexicon (positive/negative word lists)
 _POSITIVE = {

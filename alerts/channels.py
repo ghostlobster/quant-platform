@@ -19,16 +19,16 @@ Public API
 """
 from __future__ import annotations
 
-import logging
 import os
 import smtplib
 import socket
+import structlog
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.mime.text import MIMEText
 from typing import Protocol
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 # ── Protocol ──────────────────────────────────────────────────────────────────

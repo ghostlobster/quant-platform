@@ -1,12 +1,12 @@
 """Walk-forward backtesting — rolling train/test windows."""
-import logging
+import structlog
 import pandas as pd
 import numpy as np
 from dataclasses import dataclass, field
 from typing import List, Optional
 from backtester.engine import run_backtest, BacktestResult
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 @dataclass

@@ -2,9 +2,9 @@
 import pandas as pd
 from datetime import datetime, timedelta
 from typing import Optional
-import logging
+import structlog
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 def get_earnings_dates(ticker: str, lookahead_days: int = 90) -> Optional[pd.DataFrame]:

@@ -3,9 +3,9 @@ import numpy as np
 import pandas as pd
 from dataclasses import dataclass, field
 from typing import Optional, Tuple, List
-import logging
+import structlog
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 @dataclass

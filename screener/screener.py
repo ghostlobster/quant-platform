@@ -23,7 +23,7 @@ Signal labels (assigned to the *unfiltered* DataFrame for display)
 """
 from __future__ import annotations
 
-import logging
+import structlog
 from typing import Optional
 
 import numpy as np
@@ -32,7 +32,7 @@ import yfinance as yf
 
 from data.indicators import compute_rsi
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 # ── Ticker universe ───────────────────────────────────────────────────────────
 

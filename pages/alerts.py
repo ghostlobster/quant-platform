@@ -1,7 +1,7 @@
 """
 pages/alerts.py — Price & RSI alerts tab.
 """
-import logging
+import structlog
 
 import pandas as pd
 import streamlit as st
@@ -17,7 +17,7 @@ from scheduler.alerts import (
     ALERT_TYPES,
 )
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 def render() -> None:
