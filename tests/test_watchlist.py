@@ -8,17 +8,14 @@ from __future__ import annotations
 import sqlite3
 from unittest.mock import patch
 
-import pytest
-
 from data.watchlist import (
-    _ensure_defaults,
-    get_watchlist,
-    add_ticker,
-    remove_ticker,
-    is_in_watchlist,
     _DEFAULT_TICKERS,
+    _ensure_defaults,
+    add_ticker,
+    get_watchlist,
+    is_in_watchlist,
+    remove_ticker,
 )
-
 
 # ── In-memory DB fixture ──────────────────────────────────────────────────────
 

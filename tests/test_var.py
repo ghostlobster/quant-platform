@@ -1,10 +1,12 @@
-import pytest
+import os
+import sys
+
 import numpy as np
 import pandas as pd
-import sys, os
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from risk.var import historical_var, parametric_var, conditional_var, portfolio_var
+from risk.var import conditional_var, historical_var, parametric_var, portfolio_var
 
 
 def make_returns(n=252, seed=42):

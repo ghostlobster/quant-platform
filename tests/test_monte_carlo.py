@@ -1,10 +1,12 @@
-import pytest
-import pandas as pd
+import os
+import sys
+
 import numpy as np
-import sys, os
+import pandas as pd
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from backtester.monte_carlo import run_monte_carlo, MonteCarloResult
+from backtester.monte_carlo import MonteCarloResult, run_monte_carlo
 
 
 def make_returns(n=252, seed=1):

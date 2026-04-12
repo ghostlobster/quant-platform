@@ -3,10 +3,10 @@ Alpaca Markets API bridge — paper and live trading.
 Requires ALPACA_API_KEY and ALPACA_SECRET_KEY in .env
 Set ALPACA_PAPER=true for paper trading (default).
 """
-import os
 import logging
-from typing import Optional
+import os
 from dataclasses import dataclass
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 

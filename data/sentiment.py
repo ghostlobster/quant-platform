@@ -2,10 +2,10 @@
 News sentiment scoring using keyword-based VADER-style approach.
 Falls back gracefully if transformers/VADER not installed.
 """
-import re
 import logging
+import re
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import List
 
 logger = logging.getLogger(__name__)
 

@@ -1,12 +1,16 @@
-import pytest
+import os
+import sys
+
 import numpy as np
 import pandas as pd
-import sys, os
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from risk.markowitz import (
-    compute_efficient_frontier, get_max_sharpe_portfolio,
-    get_min_volatility_portfolio, OptimalPortfolio
+    OptimalPortfolio,
+    compute_efficient_frontier,
+    get_max_sharpe_portfolio,
+    get_min_volatility_portfolio,
 )
 
 

@@ -1,6 +1,4 @@
 """Slippage and commission modelling for realistic backtest cost simulation."""
-import numpy as np
-import pandas as pd
 from dataclasses import dataclass
 from typing import Optional
 

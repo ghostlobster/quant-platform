@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: pip install ruff
+      - run: ruff check .
+
+  security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: pip install bandit pip-audit
+      - name: Bandit static analysis
+        run: bandit -r . -ll --exclude ./.git,./tests -f json -o bandit-report.json || true
+      - name: Check bandit results
+        run: python -c "import json,sys; r=json.load(open('bandit-report.json')); highs=[i for i in r['results'] if i['issue_severity']=='HIGH']; print(f'{len(highs)} HIGH severity issues'); sys.exit(1 if highs else 0)"
+      - name: pip-audit
+        run: pip-audit -r requirements.txt --ignore-vuln PYSEC-2022-42969 || true
+      - uses: actions/upload-artifact@v4
+        with: { name: bandit-report, path: bandit-report.json }
+
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: pip install -r requirements.txt pytest pytest-cov
+      - name: Run unit tests
+        run: pytest tests/ --cov=. --cov-report=xml --cov-fail-under=76

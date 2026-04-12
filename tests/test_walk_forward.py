@@ -1,10 +1,12 @@
-import pytest
-import pandas as pd
+import os
+import sys
+
 import numpy as np
-import sys, os
+import pandas as pd
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from backtester.walk_forward import walk_forward, WalkForwardResult
+from backtester.walk_forward import WalkForwardResult, walk_forward
 
 
 def make_ohlcv(n=300, seed=7):

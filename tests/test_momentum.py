@@ -1,10 +1,17 @@
-import pytest
-import pandas as pd
+import os
+import sys
+
 import numpy as np
-import sys, os
+import pandas as pd
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from strategies.momentum import compute_momentum_score, momentum_signals, momentum_backtest, MomentumSignal
+from strategies.momentum import (
+    MomentumSignal,
+    compute_momentum_score,
+    momentum_backtest,
+    momentum_signals,
+)
 
 
 def make_ohlcv(n=200, seed=42, trend=0.001):
