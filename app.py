@@ -2,10 +2,9 @@
 Quant Platform — Main Streamlit Entry Point
 Run with: streamlit run app.py
 """
-import logging
-
 import streamlit as st
 
+import config
 from broker.paper_trader import init_paper_tables
 from data.db import init_db
 from journal.trading_journal import init_journal_table
@@ -23,7 +22,7 @@ from pages import (
 from scheduler.alerts import init_alerts_table
 
 # ── App bootstrap ─────────────────────────────────────────────────────────────
-logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+config.configure_logging()
 init_db()
 init_paper_tables()
 init_alerts_table()
