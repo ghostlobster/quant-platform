@@ -1,0 +1,1 @@
+# adapters/llm — LLMProvider implementations.
