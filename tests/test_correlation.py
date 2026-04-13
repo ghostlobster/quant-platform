@@ -1,10 +1,12 @@
-import pytest
-import pandas as pd
+import os
+import sys
+
 import numpy as np
-import sys, os
+import pandas as pd
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from risk.correlation import compute_correlation_matrix, build_heatmap
+from risk.correlation import build_heatmap, compute_correlation_matrix
 
 
 def make_prices(n=60, seed=42):

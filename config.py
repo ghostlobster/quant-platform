@@ -2,6 +2,7 @@
 App-wide configuration — all secrets loaded from .env, never hardcoded.
 """
 import os
+
 from dotenv import load_dotenv
 
 load_dotenv()

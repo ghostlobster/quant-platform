@@ -5,8 +5,8 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-from screener.screener import run_screen, UNIVERSE
 from pages.shared import set_ticker
+from screener.screener import UNIVERSE, run_screen
 
 
 def render() -> None:

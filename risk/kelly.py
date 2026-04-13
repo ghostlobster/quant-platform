@@ -1,6 +1,4 @@
 """Kelly Criterion position sizing."""
-import numpy as np
-from typing import Optional
 
 
 def kelly_fraction(win_rate: float, avg_win: float, avg_loss: float,

@@ -2,18 +2,16 @@
 Tests for data/realtime.py.
 All network I/O (yfinance, websockets) is mocked — no real connections.
 """
-import sys
 import os
+import sys
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 import threading
 import time
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from data.realtime import Quote, RealtimeFeed, create_feed
-
 
 # ---------------------------------------------------------------------------
 # Helpers

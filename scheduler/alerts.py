@@ -30,13 +30,11 @@ from __future__ import annotations
 import time
 from typing import Any
 
-import numpy as np
 import pandas as pd
 
-from data.db import get_connection
-from data.indicators import compute_rsi
-from utils.logger import get_logger
 from alerts.channels import broadcast
+from data.db import get_connection
+from utils.logger import get_logger
 
 logger = get_logger(__name__)
 

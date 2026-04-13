@@ -3,22 +3,19 @@ tests/test_channels.py — Unit tests for alerts/channels.py
 
 All network I/O is mocked; no real requests are sent.
 """
+import os
 import smtplib
 import sys
-import os
-
-import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from alerts.channels import (
-    TelegramChannel,
     EmailChannel,
+    TelegramChannel,
     WebhookChannel,
-    get_configured_channels,
     broadcast,
+    get_configured_channels,
 )
-
 
 # ── get_configured_channels ───────────────────────────────────────────────────
 

@@ -4,16 +4,20 @@ pages/portfolio.py — Paper trading portfolio tab.
 import numpy as np
 import streamlit as st
 
-from data.fetcher import fetch_latest_price
 from broker.paper_trader import (
-    buy as pt_buy,
-    sell as pt_sell,
+    STARTING_CASH,
+    get_account,
     get_portfolio,
     get_trade_history,
-    get_account,
     reset_account,
-    STARTING_CASH,
 )
+from broker.paper_trader import (
+    buy as pt_buy,
+)
+from broker.paper_trader import (
+    sell as pt_sell,
+)
+from data.fetcher import fetch_latest_price
 
 
 def render() -> None:
