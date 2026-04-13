@@ -411,7 +411,8 @@ class TestPagesPortfolio:
              patch("pages.portfolio.get_trade_history", return_value=pd.DataFrame()), \
              patch("pages.portfolio.fetch_latest_price", return_value={"price": 150.0, "error": None}), \
              patch("pages.portfolio.pt_buy", return_value={"status": "ok"}), \
-             patch("pages.portfolio.pt_sell", return_value={"status": "ok"}):
+             patch("pages.portfolio.pt_sell", return_value={"status": "ok"}), \
+             patch("pages.portfolio.reset_account"):
             pg_portfolio.render()
 
 
