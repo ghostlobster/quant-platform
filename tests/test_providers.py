@@ -77,3 +77,87 @@ def test_vader_adapter_skip_if_not_installed():
     from adapters.sentiment.vader_adapter import VaderSentimentAdapter
     v = VaderSentimentAdapter()
     assert -1.0 <= v.score("Great earnings beat!") <= 1.0
+
+
+def test_get_market_data_mock():
+    from providers import MarketDataProvider, get_market_data
+    md = get_market_data("mock")
+    assert isinstance(md, MarketDataProvider)
+    bars = md.get_bars("AAPL", "1Day", "2024-01-01", "2024-01-31")
+    assert isinstance(bars, list)
+
+
+def test_paper_broker_place_order():
+    from providers import get_broker
+    broker = get_broker("paper")
+    order = broker.place_order("AAPL", 10, "buy")
+    assert isinstance(order, dict)
+
+
+def test_paper_broker_get_positions():
+    from providers import get_broker
+    broker = get_broker("paper")
+    positions = broker.get_positions()
+    assert isinstance(positions, list)
+
+
+def test_paper_broker_get_orders():
+    from providers import get_broker
+    broker = get_broker("paper")
+    orders = broker.get_orders()
+    assert isinstance(orders, list)
+
+
+def test_execution_algo_market_order():
+    from providers import ExecutionAlgoProvider, get_broker, get_execution_algo
+    algo = get_execution_algo("market")
+    assert isinstance(algo, ExecutionAlgoProvider)
+    broker = get_broker("paper")
+    results = algo.execute("AAPL", 5, "buy", broker)
+    assert isinstance(results, list)
+    assert len(results) >= 1
+
+
+def test_unknown_providers_raise_value_error():
+    from providers import (
+        get_alert_channel,
+        get_broker,
+        get_execution_algo,
+        get_llm,
+        get_market_data,
+        get_sentiment,
+        get_tsdb,
+    )
+    for factory, name in [
+        (get_llm, "bad_llm"),
+        (get_broker, "bad_broker"),
+        (get_market_data, "bad_md"),
+        (get_alert_channel, "bad_alert"),
+        (get_sentiment, "bad_sent"),
+        (get_execution_algo, "bad_algo"),
+        (get_tsdb, "bad_db"),
+    ]:
+        with pytest.raises(ValueError):
+            factory(name)
+
+
+def test_mock_llm_embed_shape():
+    from providers import get_llm
+    llm = get_llm("mock")
+    emb = llm.embed("hello world")
+    assert len(emb) > 0 and all(isinstance(x, float) for x in emb)
+
+
+def test_noop_alert_all_levels():
+    from providers import get_alert_channel
+    alert = get_alert_channel("noop")
+    for level in ("info", "warning", "error"):
+        assert alert.send("msg", level=level) is True
+
+
+def test_mock_sentiment_full():
+    from providers import get_sentiment
+    s = get_sentiment("mock")
+    assert isinstance(s.score("great"), float)
+    assert len(s.batch_score(["a", "b"])) == 2
+    assert isinstance(s.ticker_sentiment("AAPL"), float)
