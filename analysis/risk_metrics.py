@@ -22,6 +22,7 @@ class RiskMetrics:
 
 
 def _pct_returns(portfolio_values: Sequence[float]) -> list[float]:
+    """Convert a series of portfolio values to daily % returns."""
     vals = list(portfolio_values)
     if len(vals) < 2:
         return []
@@ -29,6 +30,10 @@ def _pct_returns(portfolio_values: Sequence[float]) -> list[float]:
 
 
 def historical_var(returns: Sequence[float], confidence: float = 0.95) -> float:
+    """Historical simulation VaR at given confidence level.
+    Returns a positive number representing the loss at the given confidence level.
+    e.g. 0.02 means 2% loss at the VaR threshold.
+    """
     if not returns:
         return 0.0
     sorted_r = sorted(returns)
@@ -38,6 +43,7 @@ def historical_var(returns: Sequence[float], confidence: float = 0.95) -> float:
 
 
 def historical_cvar(returns: Sequence[float], confidence: float = 0.95) -> float:
+    """Historical CVaR (Expected Shortfall) — mean of losses beyond VaR threshold."""
     if not returns:
         return 0.0
     sorted_r = sorted(returns)
@@ -53,6 +59,7 @@ def monte_carlo_var(
     confidence: float = 0.95,
     seed: int = 42,
 ) -> float:
+    """Monte Carlo VaR via bootstrap resampling of historical returns."""
     if not returns:
         return 0.0
     rng = random.Random(seed)
@@ -68,11 +75,14 @@ def compute_risk_metrics(
     portfolio_values: Sequence[float],
     confidence_levels: tuple[float, float] = (0.95, 0.99),
 ) -> Optional[RiskMetrics]:
+    """Compute a full RiskMetrics snapshot from a portfolio value series."""
     returns = _pct_returns(portfolio_values)
     if len(returns) < 5:
         return None
+
     c_lo, c_hi = confidence_levels
     ann_vol = float(np.std(returns, ddof=1)) * math.sqrt(252) if len(returns) > 1 else 0.0
+
     return RiskMetrics(
         var_95=historical_var(returns, c_lo),
         var_99=historical_var(returns, c_hi),
