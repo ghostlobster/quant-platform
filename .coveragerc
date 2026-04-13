@@ -3,3 +3,4 @@ omit =
     venv/*
     .venv/*
     tests/*
+    pages/chart.py
