@@ -28,7 +28,7 @@ Desktop notifications
 from __future__ import annotations
 
 import time
-from typing import Any, Optional
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -284,7 +284,7 @@ def check_alerts(current_data: dict[str, dict[str, Any]]) -> list[dict]:
 
 # ── Daily VaR check ───────────────────────────────────────────────────────────
 
-def run_var_check(var_threshold: float = 0.03) -> Optional[dict]:
+def run_var_check(var_threshold: float = 0.03) -> dict | None:
     """
     Read recent portfolio values from the DB (last 252 trading days) and
     compute risk metrics.  If VaR 95% exceeds *var_threshold*, fire an alert
