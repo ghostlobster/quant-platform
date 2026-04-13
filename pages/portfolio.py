@@ -192,6 +192,27 @@ def render() -> None:
                 f"avg realised P&L per sell: ${sells['Realised P&L'].mean():+,.2f}"
             )
 
+    # ---- Risk Metrics ----
+    with st.expander("📊 Portfolio Risk Metrics", expanded=False):
+        try:
+            from analysis.risk_metrics import compute_risk_metrics
+
+            _sample_vals = [100.0 * (1.01 ** i) for i in range(30)]  # placeholder
+            _metrics = compute_risk_metrics(_sample_vals)
+            if _metrics is None:
+                st.info("Need at least 5 trading days of data to compute risk metrics.")
+            else:
+                c1, c2, c3 = st.columns(3)
+                c1.metric("VaR 95%", f"{_metrics.var_95 * 100:.2f}%")
+                c2.metric("VaR 99%", f"{_metrics.var_99 * 100:.2f}%")
+                c3.metric("CVaR 95%", f"{_metrics.cvar_95 * 100:.2f}%")
+                c4, c5, c6 = st.columns(3)
+                c4.metric("CVaR 99%", f"{_metrics.cvar_99 * 100:.2f}%")
+                c5.metric("Ann. Volatility", f"{_metrics.volatility_annual:.2f}%")
+                c6.metric("Worst Day", f"{_metrics.worst_day_pct:.2f}%")
+        except Exception as exc:
+            st.warning(f"Risk metrics unavailable: {exc}")
+
     # ── Danger zone: reset ────────────────────────────────────────────────────
     st.divider()
     with st.expander("⚠️ Danger Zone"):
