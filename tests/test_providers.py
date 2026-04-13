@@ -1,11 +1,11 @@
 import os
+from unittest.mock import patch
 
 import pytest
-from unittest.mock import patch
 
 
 def test_get_llm_mock():
-    from providers import get_llm, LLMProvider
+    from providers import LLMProvider, get_llm
     llm = get_llm("mock")
     assert isinstance(llm, LLMProvider)
     result = llm.complete("hello")
@@ -26,7 +26,7 @@ def test_get_llm_unknown_raises():
 
 
 def test_get_broker_paper():
-    from providers import get_broker, BrokerProvider
+    from providers import BrokerProvider, get_broker
     broker = get_broker("paper")
     assert isinstance(broker, BrokerProvider)
     info = broker.get_account_info()
@@ -35,7 +35,7 @@ def test_get_broker_paper():
 
 
 def test_get_alert_noop():
-    from providers import get_alert_channel, AlertProvider
+    from providers import AlertProvider, get_alert_channel
     alert = get_alert_channel("noop")
     assert isinstance(alert, AlertProvider)
     result = alert.send("test message", level="info")
@@ -43,7 +43,7 @@ def test_get_alert_noop():
 
 
 def test_get_sentiment_mock():
-    from providers import get_sentiment, SentimentProvider
+    from providers import SentimentProvider, get_sentiment
     s = get_sentiment("mock")
     assert isinstance(s, SentimentProvider)
     score = s.score("This stock is amazing!")
@@ -51,7 +51,7 @@ def test_get_sentiment_mock():
 
 
 def test_get_execution_algo_market():
-    from providers import get_execution_algo, ExecutionAlgoProvider
+    from providers import ExecutionAlgoProvider, get_execution_algo
     algo = get_execution_algo("market")
     assert isinstance(algo, ExecutionAlgoProvider)
 
@@ -59,9 +59,10 @@ def test_get_execution_algo_market():
 def test_get_tsdb_sqlite(tmp_path):
     with patch.dict(os.environ, {"SQLITE_DB_PATH": str(tmp_path / "test.db")}):
         import importlib
+
         import adapters.tsdb.sqlite_adapter as mod
         importlib.reload(mod)
-        from providers import get_tsdb, TSDBProvider
+        from providers import TSDBProvider, get_tsdb
         db = get_tsdb("sqlite")
         assert isinstance(db, TSDBProvider)
         db.create_table("test_tbl", "id INTEGER PRIMARY KEY, val TEXT")

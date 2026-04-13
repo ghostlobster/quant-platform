@@ -4,8 +4,8 @@ data/watchlist.py — SQLite-backed watchlist for tracking tickers.
 Provides simple CRUD helpers. The watchlist table is shared with the rest of
 the app via data/db.py — no direct SQL outside this module.
 """
-import time
 import logging
+import time
 from typing import List
 
 from data.db import get_connection, init_db

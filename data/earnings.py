@@ -1,8 +1,8 @@
 """Earnings calendar — fetch upcoming earnings dates via yfinance."""
-import pandas as pd
-from datetime import datetime, timedelta
-from typing import Optional
 import logging
+from typing import Optional
+
+import pandas as pd
 
 logger = logging.getLogger(__name__)
 

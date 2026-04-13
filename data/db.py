@@ -6,7 +6,6 @@ first use (CREATE TABLE IF NOT EXISTS), so no migration scripts are needed
 for a personal-use local app.
 """
 import sqlite3
-import os
 from pathlib import Path
 
 # Database lives at project root — excluded from git via .gitignore

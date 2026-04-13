@@ -7,8 +7,8 @@ Configure via environment variables:
   CCXT_SANDBOX   — use sandbox/testnet mode (default: true)
 Safe no-op when credentials are absent or ccxt is not installed.
 """
-import os
 import logging
+import os
 
 import pandas as pd
 

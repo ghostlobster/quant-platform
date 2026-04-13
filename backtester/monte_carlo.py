@@ -1,9 +1,9 @@
 """Monte Carlo simulation for return path analysis."""
+from dataclasses import dataclass
+
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
-from dataclasses import dataclass
-from typing import Optional
 
 
 @dataclass
