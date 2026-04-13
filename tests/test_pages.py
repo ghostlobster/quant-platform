@@ -6,15 +6,12 @@ called without crashing, and that the basic code paths execute.
 """
 from __future__ import annotations
 
-import importlib
 import sys
 from datetime import date, timedelta
 from unittest.mock import MagicMock, patch
 
-import pandas as pd
 import numpy as np
-import pytest
-
+import pandas as pd
 
 # ── Build a comprehensive streamlit mock BEFORE importing any page ────────────
 
@@ -113,14 +110,13 @@ sys.modules["streamlit"]          = _ST
 sys.modules["streamlit_autorefresh"] = MagicMock()
 
 # Now it's safe to import page modules
-import pages.backtest         as pg_backtest
-import pages.efficient_frontier as pg_ef
-import pages.journal_tab      as pg_journal
-import pages.portfolio        as pg_portfolio
-import pages.screener         as pg_screener
-import pages.shared           as pg_shared
-import pages.alerts           as pg_alerts
-
+import pages.alerts as pg_alerts  # noqa: E402
+import pages.backtest as pg_backtest  # noqa: E402
+import pages.efficient_frontier as pg_ef  # noqa: E402
+import pages.journal_tab as pg_journal  # noqa: E402
+import pages.portfolio as pg_portfolio  # noqa: E402
+import pages.screener as pg_screener  # noqa: E402
+import pages.shared as pg_shared  # noqa: E402
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 

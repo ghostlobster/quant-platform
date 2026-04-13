@@ -1,8 +1,9 @@
 """Pairs trading strategy based on cointegration and z-score mean reversion."""
+from dataclasses import dataclass
+from typing import Optional, Tuple
+
 import numpy as np
 import pandas as pd
-from dataclasses import dataclass, field
-from typing import Optional, Tuple, List
 import structlog
 
 logger = structlog.get_logger(__name__)

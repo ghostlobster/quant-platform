@@ -1,8 +1,9 @@
-import pytest
-import sys, os
+import os
+import sys
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from data.sentiment import score_text, score_headlines, SentimentScore, _lexicon_score
+from data.sentiment import score_headlines, score_text
 
 
 def test_positive_headline():

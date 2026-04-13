@@ -1,7 +1,7 @@
 """Earnings calendar — fetch upcoming earnings dates via yfinance."""
-import pandas as pd
-from datetime import datetime, timedelta
 from typing import Optional
+
+import pandas as pd
 import structlog
 
 logger = structlog.get_logger(__name__)

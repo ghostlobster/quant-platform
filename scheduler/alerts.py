@@ -29,15 +29,13 @@ from __future__ import annotations
 
 import time
 import uuid
-from typing import Any, Optional
+from typing import Any
 
-import numpy as np
 import pandas as pd
 import structlog
 
-from data.db import get_connection
-from data.indicators import compute_rsi
 from alerts.channels import broadcast
+from data.db import get_connection
 
 logger = structlog.get_logger(__name__)
 

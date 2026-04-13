@@ -23,11 +23,11 @@ Signal labels (assigned to the *unfiltered* DataFrame for display)
 """
 from __future__ import annotations
 
-import structlog
 from typing import Optional
 
 import numpy as np
 import pandas as pd
+import structlog
 import yfinance as yf
 
 from data.indicators import compute_rsi

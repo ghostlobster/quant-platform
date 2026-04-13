@@ -4,9 +4,10 @@ Requires ALPACA_API_KEY and ALPACA_SECRET_KEY in .env
 Set ALPACA_PAPER=true for paper trading (default).
 """
 import os
-import structlog
-from typing import Optional
 from dataclasses import dataclass
+from typing import Optional
+
+import structlog
 
 logger = structlog.get_logger(__name__)
 

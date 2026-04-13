@@ -8,22 +8,21 @@ from __future__ import annotations
 
 import sqlite3
 import time
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pandas as pd
 import pytest
 
 from scheduler.alerts import (
     ALERT_TYPES,
-    init_alerts_table,
-    add_alert,
-    get_alerts,
-    delete_alert,
-    toggle_alert,
-    check_alerts,
     _notify,
+    add_alert,
+    check_alerts,
+    delete_alert,
+    get_alerts,
+    init_alerts_table,
+    toggle_alert,
 )
-
 
 # ── In-memory DB fixture ──────────────────────────────────────────────────────
 

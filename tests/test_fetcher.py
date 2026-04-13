@@ -5,10 +5,10 @@ Mocks yfinance and the SQLite DB so no I/O occurs.
 """
 from __future__ import annotations
 
-import io
 import sqlite3
 import time
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import patch
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -79,8 +79,14 @@ def _ohlcv_df(n: int = 10) -> pd.DataFrame:
 
 
 # Import the module under test after setting up helpers
-from data.fetcher import _ttl_for, _flatten_columns, _cache_read, _cache_write, fetch_ohlcv, fetch_latest_price
-
+from data.fetcher import (  # noqa: E402
+    _cache_read,
+    _cache_write,
+    _flatten_columns,
+    _ttl_for,
+    fetch_latest_price,
+    fetch_ohlcv,
+)
 
 # ── _ttl_for ──────────────────────────────────────────────────────────────────
 

@@ -5,8 +5,9 @@ Provides simple CRUD helpers. The watchlist table is shared with the rest of
 the app via data/db.py — no direct SQL outside this module.
 """
 import time
-import structlog
 from typing import List
+
+import structlog
 
 from data.db import get_connection, init_db
 

@@ -8,9 +8,9 @@ Configure via environment variables:
 Safe no-op when credentials are absent or ccxt is not installed.
 """
 import os
-import structlog
 
 import pandas as pd
+import structlog
 
 logger = structlog.get_logger(__name__)
 

@@ -3,9 +3,10 @@ News sentiment scoring using keyword-based VADER-style approach.
 Falls back gracefully if transformers/VADER not installed.
 """
 import re
-import structlog
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import List
+
+import structlog
 
 logger = structlog.get_logger(__name__)
 

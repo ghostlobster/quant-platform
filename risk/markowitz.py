@@ -1,9 +1,10 @@
 """Markowitz Mean-Variance Portfolio Optimization."""
+from dataclasses import dataclass
+from typing import Optional, Tuple
+
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
-from dataclasses import dataclass
-from typing import List, Optional, Tuple
 
 
 @dataclass
