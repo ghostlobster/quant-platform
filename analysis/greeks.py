@@ -28,7 +28,6 @@ def _norm_cdf(x: float) -> float:
     a5 =  1.330274429
     p  =  0.2316419
 
-    sign = 1.0 if x >= 0 else -1.0
     x_abs = abs(x)
     t = 1.0 / (1.0 + p * x_abs)
     poly = t * (a1 + t * (a2 + t * (a3 + t * (a4 + t * a5))))

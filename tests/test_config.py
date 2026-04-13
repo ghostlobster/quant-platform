@@ -4,12 +4,11 @@ Tests for config.py and analysis/regime.get_live_regime().
 from __future__ import annotations
 
 import os
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pandas as pd
 import pytest
-
 
 # ── config.py ─────────────────────────────────────────────────────────────────
 
@@ -17,6 +16,7 @@ class TestConfig:
     def test_alpaca_api_key_defaults_to_empty(self):
         with patch.dict(os.environ, {}, clear=False):
             import importlib
+
             import config
             importlib.reload(config)
             assert isinstance(config.ALPACA_API_KEY, str)
@@ -32,6 +32,7 @@ class TestConfig:
     def test_app_env_default_is_development(self):
         with patch.dict(os.environ, {"APP_ENV": "development"}):
             import importlib
+
             import config
             importlib.reload(config)
             assert config.APP_ENV == "development"
@@ -39,6 +40,7 @@ class TestConfig:
     def test_log_level_default_is_info(self):
         with patch.dict(os.environ, {"LOG_LEVEL": "INFO"}):
             import importlib
+
             import config
             importlib.reload(config)
             assert config.LOG_LEVEL == "INFO"
@@ -46,6 +48,7 @@ class TestConfig:
     def test_env_var_override(self):
         with patch.dict(os.environ, {"ALPACA_API_KEY": "test_key_123"}):
             import importlib
+
             import config
             importlib.reload(config)
             assert config.ALPACA_API_KEY == "test_key_123"
@@ -67,8 +70,8 @@ class TestGetLiveRegime:
         mock_yf.download.side_effect = [spy_df, vix_df]
 
         with patch.dict("sys.modules", {"yfinance": mock_yf}):
-            from analysis.regime import get_live_regime
             import importlib
+
             import analysis.regime
             importlib.reload(analysis.regime)
             result = analysis.regime.get_live_regime()
@@ -85,6 +88,7 @@ class TestGetLiveRegime:
 
         with patch.dict("sys.modules", {"yfinance": mock_yf}):
             import importlib
+
             import analysis.regime
             importlib.reload(analysis.regime)
             with pytest.raises(RuntimeError, match="SPY"):
@@ -98,6 +102,7 @@ class TestGetLiveRegime:
 
         with patch.dict("sys.modules", {"yfinance": mock_yf}):
             import importlib
+
             import analysis.regime
             importlib.reload(analysis.regime)
             with pytest.raises(RuntimeError, match="VIX"):
@@ -113,6 +118,7 @@ class TestGetLiveRegime:
 
         with patch.dict("sys.modules", {"yfinance": mock_yf}):
             import importlib
+
             import analysis.regime
             importlib.reload(analysis.regime)
             result = analysis.regime.get_live_regime()

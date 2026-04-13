@@ -5,8 +5,8 @@ from datetime import date, timedelta
 
 import streamlit as st
 
+from backtester.engine import build_equity_chart, build_trade_log_df, run_backtest
 from data.fetcher import fetch_ohlcv
-from backtester.engine import run_backtest, build_equity_chart, build_trade_log_df
 
 _STRATEGIES = {
     "SMA Crossover (20/50)":       "sma_crossover",

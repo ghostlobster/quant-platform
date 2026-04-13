@@ -1,14 +1,12 @@
 """Tests for analysis/regime.py — market regime classification."""
 import numpy as np
 import pandas as pd
-import pytest
 
 from analysis.regime import (
     REGIME_METADATA,
     detect_regime,
     kelly_regime_multiplier,
 )
-
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 

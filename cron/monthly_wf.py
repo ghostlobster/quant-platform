@@ -7,8 +7,8 @@ Results saved to: data/wf_history.db (SQLite)
 Table: wf_results (run_date, ticker, consistency_score, total_return, n_windows)
 """
 import os
-import sys
 import sqlite3
+import sys
 from datetime import date
 from pathlib import Path
 

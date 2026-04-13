@@ -1,8 +1,11 @@
+import os
+import sys
+
 import pytest
-import sys, os
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from broker.execution import simulate_execution, ExecutionModel, ExecutionCost, cost_drag, ZERO_COST_MODEL
+from broker.execution import ZERO_COST_MODEL, cost_drag, simulate_execution
 
 
 def test_buy_pays_more():

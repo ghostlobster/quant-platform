@@ -6,15 +6,12 @@ called without crashing, and that the basic code paths execute.
 """
 from __future__ import annotations
 
-import importlib
 import sys
 from datetime import date, timedelta
 from unittest.mock import MagicMock, patch
 
-import pandas as pd
 import numpy as np
-import pytest
-
+import pandas as pd
 
 # ── Build a comprehensive streamlit mock BEFORE importing any page ────────────
 
@@ -92,7 +89,10 @@ def _make_st_mock() -> MagicMock:
     st.sidebar = _widget_mock()
 
     # cache_data / cache_resource — pass-through decorators
+    # Handles both @st.cache_data (no parens) and @st.cache_data(...) (with parens)
     def _cache_data(*args, **kw):
+        if args and callable(args[0]):
+            return args[0]
         def decorator(fn):
             return fn
         return decorator
@@ -113,14 +113,13 @@ sys.modules["streamlit"]          = _ST
 sys.modules["streamlit_autorefresh"] = MagicMock()
 
 # Now it's safe to import page modules
-import pages.backtest         as pg_backtest
-import pages.efficient_frontier as pg_ef
-import pages.journal_tab      as pg_journal
-import pages.portfolio        as pg_portfolio
-import pages.screener         as pg_screener
-import pages.shared           as pg_shared
-import pages.alerts           as pg_alerts
-
+import pages.alerts as pg_alerts  # noqa: E402
+import pages.backtest as pg_backtest  # noqa: E402
+import pages.efficient_frontier as pg_ef  # noqa: E402
+import pages.journal_tab as pg_journal  # noqa: E402
+import pages.portfolio as pg_portfolio  # noqa: E402
+import pages.screener as pg_screener  # noqa: E402
+import pages.shared as pg_shared  # noqa: E402
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -415,7 +414,8 @@ class TestPagesPortfolio:
              patch("pages.portfolio.get_trade_history", return_value=pd.DataFrame()), \
              patch("pages.portfolio.fetch_latest_price", return_value={"price": 150.0, "error": None}), \
              patch("pages.portfolio.pt_buy", return_value={"status": "ok"}), \
-             patch("pages.portfolio.pt_sell", return_value={"status": "ok"}):
+             patch("pages.portfolio.pt_sell", return_value={"status": "ok"}), \
+             patch("pages.portfolio.reset_account"):
             pg_portfolio.render()
 
 
