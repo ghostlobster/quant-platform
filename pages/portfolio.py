@@ -192,6 +192,41 @@ def render() -> None:
                 f"avg realised P&L per sell: ${sells['Realised P&L'].mean():+,.2f}"
             )
 
+    # ── Risk Metrics ──────────────────────────────────────────────────────────
+    st.divider()
+    with st.expander("📊 Portfolio Risk Metrics", expanded=False):
+        from analysis.risk_metrics import compute_risk_metrics
+
+        hist_df2 = get_trade_history()
+        if hist_df2.empty:
+            st.info("Need at least 5 trading days of data to compute risk metrics.")
+        else:
+            # Build a mock equity curve from trade history total values
+            # Use cumulative realised P&L + STARTING_CASH as a proxy value series
+            sells2 = hist_df2[hist_df2["Action"] == "SELL"].copy()
+            if len(sells2) < 5:
+                st.info("Need at least 5 trading days of data to compute risk metrics.")
+            else:
+                cum_pnl = sells2["Realised P&L"].cumsum()
+                equity_curve = (STARTING_CASH + cum_pnl).tolist()
+                rm = compute_risk_metrics(equity_curve)
+                if rm is None:
+                    st.info("Need at least 5 trading days of data to compute risk metrics.")
+                else:
+                    rc1, rc2, rc3 = st.columns(3)
+                    rc1.metric("VaR 95% (daily)",  f"{rm.var_95 * 100:.2f}%")
+                    rc2.metric("VaR 99% (daily)",  f"{rm.var_99 * 100:.2f}%")
+                    rc3.metric("Annual Volatility", f"{rm.volatility_annual:.2f}%")
+
+                    rc4, rc5, rc6 = st.columns(3)
+                    rc4.metric("CVaR 95% (ES)",    f"{rm.cvar_95 * 100:.2f}%")
+                    rc5.metric("CVaR 99% (ES)",    f"{rm.cvar_99 * 100:.2f}%")
+                    rc6.metric("Observations",     str(rm.n_observations))
+
+                    rc7, rc8, _ = st.columns(3)
+                    rc7.metric("Worst Day",  f"{rm.worst_day_pct:.2f}%")
+                    rc8.metric("Best Day",   f"{rm.best_day_pct:.2f}%")
+
     # ── Danger zone: reset ────────────────────────────────────────────────────
     st.divider()
     with st.expander("⚠️ Danger Zone"):
