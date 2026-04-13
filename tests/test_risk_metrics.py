@@ -1,9 +1,9 @@
 from analysis.risk_metrics import (
-    historical_var,
-    historical_cvar,
-    monte_carlo_var,
-    compute_risk_metrics,
     RiskMetrics,
+    compute_risk_metrics,
+    historical_cvar,
+    historical_var,
+    monte_carlo_var,
 )
 
 RETURNS = [
