@@ -2,6 +2,7 @@
 pages/portfolio.py — Paper trading portfolio tab.
 """
 import numpy as np
+import pandas as pd
 import streamlit as st
 
 from data.fetcher import fetch_latest_price
@@ -14,6 +15,7 @@ from broker.paper_trader import (
     reset_account,
     STARTING_CASH,
 )
+from analysis.risk_metrics import compute_risk_metrics
 
 
 def render() -> None:
@@ -190,6 +192,49 @@ def render() -> None:
                 f"{total} sell{'s' if total != 1 else ''} · "
                 f"{wins}/{total} profitable · "
                 f"avg realised P&L per sell: ${sells['Realised P&L'].mean():+,.2f}"
+            )
+
+    # ── Risk Metrics ──────────────────────────────────────────────────────────
+    st.divider()
+    with st.expander("📉 Risk Metrics", expanded=False):
+        # Build NAV history from trade history: starting cash ± cumulative P&L
+        trade_hist = get_trade_history()
+        nav_values: list[float] = []
+        if not trade_hist.empty:
+            # Reconstruct NAV: start with STARTING_CASH, apply each trade's
+            # realised P&L in chronological order (oldest first)
+            chrono = trade_hist.iloc[::-1].reset_index(drop=True)
+            running = STARTING_CASH
+            nav_values = [running]
+            for _, row in chrono.iterrows():
+                pnl = row.get("Realised P&L")
+                if pnl is not None and pnl == pnl:  # not NaN
+                    running += float(pnl)
+                    nav_values.append(running)
+
+        metrics = compute_risk_metrics(nav_values) if len(nav_values) >= 10 else None
+
+        if metrics is None:
+            st.info(
+                f"Not enough history (need 10+ days). "
+                f"Currently {max(len(nav_values) - 1, 0)} observation(s)."
+            )
+        else:
+            rm1, rm2, rm3, rm4 = st.columns(4)
+            rm1.metric("1-Day VaR (95%)",  f"{metrics.var_95 * 100:.2f}%")
+            rm2.metric("1-Day CVaR (95%)", f"{metrics.cvar_95 * 100:.2f}%")
+            rm3.metric("Ann. Volatility",  f"{metrics.volatility_annual:.2f}%")
+            rm4.metric("Worst Day",        f"{metrics.worst_day_pct:.2f}%")
+
+            returns_pct = [
+                (nav_values[i] - nav_values[i - 1]) / nav_values[i - 1] * 100
+                for i in range(1, len(nav_values))
+            ]
+            st.caption(f"Daily return distribution ({metrics.n_observations} observations)")
+            st.bar_chart(
+                pd.Series(returns_pct, name="Daily Return (%)"),
+                use_container_width=True,
+                height=180,
             )
 
     # ── Danger zone: reset ────────────────────────────────────────────────────

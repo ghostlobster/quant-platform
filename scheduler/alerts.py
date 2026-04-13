@@ -27,6 +27,7 @@ Desktop notifications
 """
 from __future__ import annotations
 
+import os
 import time
 from typing import Any, Optional
 
@@ -280,3 +281,57 @@ def check_alerts(current_data: dict[str, dict[str, Any]]) -> list[dict]:
             })
 
     return triggered
+
+
+# ── Portfolio VaR limit check ─────────────────────────────────────────────────
+
+def check_portfolio_var_limit() -> Optional[dict]:
+    """
+    Check whether 1-day VaR (95%) exceeds the configured limit.
+
+    Reads PORTFOLIO_VAR_LIMIT env var (default 0.05 = 5%).
+    Builds NAV history from paper-trade records and computes risk metrics.
+    If var_95 > limit, broadcasts an alert and returns a dict with details.
+    Returns None if there is insufficient history or VaR is within limits.
+    """
+    from broker.paper_trader import get_trade_history, STARTING_CASH
+    from analysis.risk_metrics import compute_risk_metrics
+
+    var_limit = float(os.getenv("PORTFOLIO_VAR_LIMIT", "0.05"))
+
+    trade_hist = get_trade_history()
+    nav_values: list[float] = []
+    if not trade_hist.empty:
+        chrono = trade_hist.iloc[::-1].reset_index(drop=True)
+        running = STARTING_CASH
+        nav_values = [running]
+        for _, row in chrono.iterrows():
+            pnl = row.get("Realised P&L")
+            if pnl is not None and pnl == pnl:  # not NaN
+                running += float(pnl)
+                nav_values.append(running)
+
+    metrics = compute_risk_metrics(nav_values) if len(nav_values) >= 10 else None
+    if metrics is None:
+        logger.debug("check_portfolio_var_limit: insufficient history (%d obs)", len(nav_values))
+        return None
+
+    if metrics.var_95 > var_limit:
+        msg = (
+            f"⚠️ Portfolio VaR Alert: 1-day VaR at 95% confidence is "
+            f"{metrics.var_95 * 100:.1f}% — exceeds limit of {var_limit * 100:.1f}%"
+        )
+        logger.warning(msg)
+        broadcast(subject="Portfolio VaR Alert", body=msg)
+        return {
+            "var_95":     metrics.var_95,
+            "var_limit":  var_limit,
+            "message":    msg,
+        }
+
+    logger.info(
+        "check_portfolio_var_limit: VaR %.2f%% within limit %.2f%%",
+        metrics.var_95 * 100,
+        var_limit * 100,
+    )
+    return None
