@@ -167,7 +167,6 @@ def generate_signals(df: pd.DataFrame) -> list[dict]:
     if "MACD_line" in df.columns and "MACD_signal" in df.columns:
         macd_line   = _latest(df, "MACD_line")
         macd_signal = _latest(df, "MACD_signal")
-        _macd_hist   = _latest(df, "MACD_hist")
 
         if macd_line is not None and macd_signal is not None:
             # Detect crossover: previous histogram vs current

@@ -89,7 +89,10 @@ def _make_st_mock() -> MagicMock:
     st.sidebar = _widget_mock()
 
     # cache_data / cache_resource — pass-through decorators
+    # Handles both @st.cache_data (no parens) and @st.cache_data(...) (with parens)
     def _cache_data(*args, **kw):
+        if args and callable(args[0]):
+            return args[0]
         def decorator(fn):
             return fn
         return decorator

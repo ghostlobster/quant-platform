@@ -3,13 +3,12 @@ Alpaca Markets API bridge — paper and live trading.
 Requires ALPACA_API_KEY and ALPACA_SECRET_KEY in .env
 Set ALPACA_PAPER=true for paper trading (default).
 """
+import logging
 import os
 from dataclasses import dataclass
 from typing import Optional
 
-import structlog
-
-logger = structlog.get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 # Sentinels — set to None so credentials are NOT read at import time.
 # Tests may patch these directly; None means "read from os.getenv lazily".

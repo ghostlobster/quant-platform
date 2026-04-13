@@ -7,12 +7,12 @@ Configure via environment variables:
   CCXT_SANDBOX   — use sandbox/testnet mode (default: true)
 Safe no-op when credentials are absent or ccxt is not installed.
 """
+import logging
 import os
 
 import pandas as pd
-import structlog
 
-logger = structlog.get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 try:
     import ccxt as _ccxt

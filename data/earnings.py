@@ -1,10 +1,10 @@
 """Earnings calendar — fetch upcoming earnings dates via yfinance."""
+import logging
 from typing import Optional
 
 import pandas as pd
-import structlog
 
-logger = structlog.get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 
 def get_earnings_dates(ticker: str, lookahead_days: int = 90) -> Optional[pd.DataFrame]:
