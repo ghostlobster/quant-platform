@@ -3,3 +3,5 @@ omit =
     venv/*
     .venv/*
     tests/*
+    pages/*
+    app.py

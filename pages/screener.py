@@ -1,12 +1,29 @@
 """
 pages/screener.py — Stock screener tab.
 """
+import os
+
 import numpy as np
 import pandas as pd
 import streamlit as st
 
 from pages.shared import set_ticker
 from screener.screener import UNIVERSE, run_screen
+
+_DEFAULT_REFRESH = 30
+
+
+@st.cache_resource
+def get_feed():
+    from data.realtime import create_feed
+    return create_feed(mode='auto')
+
+
+def _poll_seconds() -> int:
+    try:
+        return int(os.getenv("REALTIME_POLL_SECONDS", str(_DEFAULT_REFRESH)))
+    except (ValueError, TypeError):
+        return _DEFAULT_REFRESH
 
 
 def render() -> None:
@@ -72,6 +89,75 @@ def render() -> None:
         item["ticker"] for item in UNIVERSE
         if item["sector"] in selected_sectors
     ]
+
+    # ── Live Quotes ───────────────────────────────────────────────────────────
+    poll_secs = _poll_seconds()
+    feed = get_feed()
+    if tickers_in_scope:
+        feed.subscribe(tickers_in_scope)
+
+    @st.fragment(run_every=poll_secs)
+    def _live_quotes() -> None:
+        st.markdown("#### Live Quotes")
+        st.caption(
+            f"Auto-refreshes every **{poll_secs}s** "
+            f"(`REALTIME_POLL_SECONDS={poll_secs}`)"
+        )
+
+        if not tickers_in_scope:
+            st.info("Select at least one sector to see live quotes.")
+            return
+
+        rows = []
+        for ticker in tickers_in_scope:
+            q = feed.get_quote(ticker)
+            if q is None:
+                rows.append({
+                    "Ticker": ticker,
+                    "Bid": None,
+                    "Ask": None,
+                    "Last": None,
+                    "Volume": None,
+                    "Timestamp": "Fetching…",
+                })
+            else:
+                rows.append({
+                    "Ticker": ticker,
+                    "Bid": q.bid,
+                    "Ask": q.ask,
+                    "Last": q.last,
+                    "Volume": q.volume,
+                    "Timestamp": q.timestamp,
+                })
+
+        quotes_df = pd.DataFrame(rows)
+        n_ready = int(quotes_df["Last"].notna().sum())
+        n_total = len(quotes_df)
+
+        if n_ready == 0:
+            st.info("Feed initialising — quotes arriving shortly…")
+        else:
+            st.caption(f"{n_ready} / {n_total} tickers have live data")
+
+        fmt = {col: "${:.2f}" for col in ("Bid", "Ask", "Last") if col in quotes_df.columns}
+        if "Volume" in quotes_df.columns:
+            fmt["Volume"] = "{:,.0f}"
+
+        def _style_last(val) -> str:
+            if val is None or (isinstance(val, float) and np.isnan(val)):
+                return "color: #555"
+            return ""
+
+        styled = (
+            quotes_df.style
+            .map(_style_last, subset=["Last"])
+            .format(fmt, na_rep="—")
+        )
+        st.dataframe(styled, use_container_width=True, hide_index=True)
+
+    _live_quotes()
+
+    st.divider()
 
     # ── Run button ────────────────────────────────────────────────────────────
     run_screen_btn = st.button("🔍 Run Screen", type="primary", key="sc_run")

@@ -28,3 +28,12 @@ The app will be available at **http://localhost:8501**.
 8. **Monte Carlo Simulator** — price-path simulation for portfolio and options pricing
 9. **News Sentiment** — NLP-scored headlines aggregated by ticker
 10. **Auto-refresh** — configurable sidebar timer (1 min / 5 min / 15 min / 30 min) to keep live data current
+
+## Making a Release
+
+1. Ensure all tests pass on `main`
+2. Tag the release: `git tag v1.0.0 && git push origin v1.0.0`
+3. The Release workflow runs automatically:
+   - Runs full test suite
+   - Builds and pushes Docker image to `ghcr.io/ghostlobster/quant-platform`
+   - Creates a GitHub Release with auto-generated changelog

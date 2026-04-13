@@ -28,15 +28,16 @@ Desktop notifications
 from __future__ import annotations
 
 import time
+import uuid
 from typing import Any
 
 import pandas as pd
+import structlog
 
 from alerts.channels import broadcast
 from data.db import get_connection
-from utils.logger import get_logger
 
-logger = get_logger(__name__)
+logger = structlog.get_logger(__name__)
 
 # ── Alert type constants ──────────────────────────────────────────────────────
 
@@ -210,6 +211,9 @@ def check_alerts(current_data: dict[str, dict[str, Any]]) -> list[dict]:
     list of dicts, one per triggered alert:
         {id, ticker, alert_type, threshold, price, rsi, message}
     """
+    structlog.contextvars.clear_contextvars()
+    structlog.contextvars.bind_contextvars(run_id=str(uuid.uuid4())[:8], component="scheduler")
+
     conn = get_connection()
     try:
         rows = conn.execute(
