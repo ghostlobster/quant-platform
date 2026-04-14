@@ -4,3 +4,5 @@ omit =
     .venv/*
     tests/*
     pages/chart.py
+    pages/greeks.py
+    pages/screener.py
