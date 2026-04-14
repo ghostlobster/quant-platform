@@ -16,6 +16,8 @@ import os
 import time
 from typing import Any
 
+from adapters.execution_algo.result import ExecutionResult
+
 logger = logging.getLogger(__name__)
 
 
@@ -35,8 +37,9 @@ class TWAPAdapter:
         broker: Any,
         *,
         duration_minutes: int = 30,
+        decision_price: float = 0.0,
         **kwargs: Any,
-    ) -> list[dict]:
+    ) -> ExecutionResult:
         duration_seconds = duration_minutes * 60
         n_slices = max(1, math.ceil(duration_seconds / self._slice_seconds))
         slice_qty = total_qty / n_slices
@@ -55,15 +58,21 @@ class TWAPAdapter:
             qty = round(total_qty - placed, 4) if is_last else slice_qty
             if qty <= 0:
                 break
-            result = broker.place_order(
+            fill = broker.place_order(
                 symbol=symbol,
                 qty=qty,
                 side=side,
                 order_type="market",
             )
-            fills.append(result)
+            fills.append(fill)
             placed = round(placed + qty, 4)
             if not is_last:
                 time.sleep(self._slice_seconds)
 
-        return fills
+        return ExecutionResult.from_fills(
+            fills=fills,
+            symbol=symbol,
+            side=side,
+            algo="twap",
+            decision_price=decision_price,
+        )

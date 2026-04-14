@@ -83,6 +83,33 @@ def init_db() -> None:
             )
         """)
 
+        # ----- Sentiment cache -----
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS sentiment_cache (
+                symbol      TEXT    NOT NULL,
+                provider    TEXT    NOT NULL,
+                score       REAL    NOT NULL,
+                fetched_at  REAL    NOT NULL,   -- Unix timestamp (seconds)
+                PRIMARY KEY (symbol, provider)
+            )
+        """)
+
+        # ----- Execution analytics -----
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS execution_analytics (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                executed_at     REAL    NOT NULL,
+                symbol          TEXT    NOT NULL,
+                side            TEXT    NOT NULL,
+                algo            TEXT    NOT NULL,
+                total_qty       REAL    NOT NULL,
+                decision_price  REAL    NOT NULL DEFAULT 0,
+                avg_fill_price  REAL    NOT NULL DEFAULT 0,
+                slippage_bps    REAL    NOT NULL DEFAULT 0,
+                broker          TEXT    NOT NULL DEFAULT 'paper'
+            )
+        """)
+
         # Seed paper_account if absent
         import os
         starting_cash = float(os.getenv("PAPER_STARTING_CASH", "100000"))

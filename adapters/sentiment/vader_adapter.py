@@ -50,7 +50,13 @@ class VADERAdapter:
         return [self.score(t) for t in texts]
 
     def ticker_sentiment(self, symbol: str, lookback_hours: int = 24) -> float:
-        """Fetch recent news via yfinance and score headlines."""
+        """Fetch recent news via yfinance and score headlines (30-min SQLite cache)."""
+        from adapters.sentiment.cache import cache_read, cache_write
+
+        cached = cache_read(symbol, "vader")
+        if cached is not None:
+            return cached
+
         try:
             import yfinance as yf
             ticker = yf.Ticker(symbol.upper())
@@ -64,9 +70,12 @@ class VADERAdapter:
                 if title:
                     headlines.append(title)
             if not headlines:
-                return 0.0
-            scores = self.batch_score(headlines)
-            return sum(scores) / len(scores)
+                score = 0.0
+            else:
+                scores = self.batch_score(headlines)
+                score = sum(scores) / len(scores)
+            cache_write(symbol, "vader", score)
+            return score
         except Exception as exc:
             logger.warning("ticker_sentiment failed for %s: %s", symbol, exc)
             return 0.0

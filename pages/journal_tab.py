@@ -143,3 +143,91 @@ def render() -> None:
             )
             fig2.update_traces(textposition="outside")
             st.plotly_chart(fig2, use_container_width=True)
+
+    # ── Execution Quality ─────────────────────────────────────────────────────
+    st.divider()
+    with st.expander("Execution Quality", expanded=False):
+        st.caption(
+            "Slippage analysis across execution algorithms and symbols. "
+            "Slippage = (avg fill price − decision price) / decision price × 10,000 bps."
+        )
+        try:
+            from data.db import get_connection
+            conn = get_connection()
+            rows = conn.execute(
+                "SELECT * FROM execution_analytics ORDER BY executed_at DESC LIMIT 500"
+            ).fetchall()
+            conn.close()
+            if not rows:
+                st.info(
+                    "No execution data yet. Use execute_algo() from broker/paper_trader.py "
+                    "to log fills."
+                )
+            else:
+                exec_df = pd.DataFrame([dict(r) for r in rows])
+                exec_df["executed_at"] = pd.to_datetime(
+                    exec_df["executed_at"], unit="s"
+                ).dt.strftime("%Y-%m-%d %H:%M")
+
+                eq_l, eq_r = st.columns(2)
+
+                with eq_l:
+                    st.markdown("**Avg Slippage by Algorithm (bps)**")
+                    algo_grp = (
+                        exec_df.groupby("algo")["slippage_bps"]
+                        .mean()
+                        .reset_index()
+                        .rename(columns={"algo": "Algorithm", "slippage_bps": "Avg Slippage (bps)"})
+                    )
+                    fig_algo = px.bar(
+                        algo_grp,
+                        x="Algorithm",
+                        y="Avg Slippage (bps)",
+                        color="Avg Slippage (bps)",
+                        color_continuous_scale=["#26a69a", "#ffb74d", "#ef5350"],
+                        text=algo_grp["Avg Slippage (bps)"].map(lambda v: f"{v:.1f}"),
+                    )
+                    fig_algo.update_layout(
+                        coloraxis_showscale=False,
+                        margin=dict(t=20, b=20),
+                        plot_bgcolor="rgba(0,0,0,0)",
+                        paper_bgcolor="rgba(0,0,0,0)",
+                    )
+                    st.plotly_chart(fig_algo, use_container_width=True)
+
+                with eq_r:
+                    st.markdown("**Avg Slippage by Symbol (bps)**")
+                    sym_grp = (
+                        exec_df.groupby("symbol")["slippage_bps"]
+                        .mean()
+                        .reset_index()
+                        .rename(columns={"symbol": "Symbol", "slippage_bps": "Avg Slippage (bps)"})
+                        .sort_values("Avg Slippage (bps)", ascending=False)
+                        .head(10)
+                    )
+                    fig_sym = px.bar(
+                        sym_grp,
+                        x="Symbol",
+                        y="Avg Slippage (bps)",
+                        color="Avg Slippage (bps)",
+                        color_continuous_scale=["#26a69a", "#ffb74d", "#ef5350"],
+                        text=sym_grp["Avg Slippage (bps)"].map(lambda v: f"{v:.1f}"),
+                    )
+                    fig_sym.update_layout(
+                        coloraxis_showscale=False,
+                        margin=dict(t=20, b=20),
+                        plot_bgcolor="rgba(0,0,0,0)",
+                        paper_bgcolor="rgba(0,0,0,0)",
+                    )
+                    st.plotly_chart(fig_sym, use_container_width=True)
+
+                st.markdown("**Recent Fills**")
+                st.dataframe(
+                    exec_df[[
+                        "executed_at", "symbol", "side", "algo",
+                        "total_qty", "decision_price", "avg_fill_price", "slippage_bps",
+                    ]].head(20),
+                    use_container_width=True,
+                )
+        except Exception as exc:
+            st.warning(f"Could not load execution analytics: {exc}")

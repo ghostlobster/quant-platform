@@ -254,13 +254,15 @@ class TestExecutionAlgoProvider:
         algo = get_execution_algo("market")
         assert isinstance(algo, ExecutionAlgoProvider)
 
-    def test_market_algo_execute_returns_list(self):
+    def test_market_algo_execute_returns_execution_result(self):
+        from adapters.execution_algo.result import ExecutionResult
         from providers.execution_algo import get_execution_algo
         algo = get_execution_algo("market")
         broker = self._paper_broker()
-        fills = algo.execute("AAPL", 5.0, "buy", broker)
-        assert isinstance(fills, list)
-        assert len(fills) == 1
+        result = algo.execute("AAPL", 5.0, "buy", broker)
+        assert isinstance(result, ExecutionResult)
+        assert result.symbol == "AAPL"
+        assert result.total_qty == pytest.approx(5.0)
 
     def test_unknown_algo_raises_value_error(self):
         from providers.execution_algo import get_execution_algo
