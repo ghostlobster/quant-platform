@@ -28,15 +28,16 @@ Desktop notifications
 from __future__ import annotations
 
 import time
+import uuid
 from typing import Any
 
 import pandas as pd
+import structlog
 
 from alerts.channels import broadcast
 from data.db import get_connection
-from utils.logger import get_logger
 
-logger = get_logger(__name__)
+logger = structlog.get_logger(__name__)
 
 # ── Alert type constants ──────────────────────────────────────────────────────
 
@@ -210,6 +211,9 @@ def check_alerts(current_data: dict[str, dict[str, Any]]) -> list[dict]:
     list of dicts, one per triggered alert:
         {id, ticker, alert_type, threshold, price, rsi, message}
     """
+    structlog.contextvars.clear_contextvars()
+    structlog.contextvars.bind_contextvars(run_id=str(uuid.uuid4())[:8], component="scheduler")
+
     conn = get_connection()
     try:
         rows = conn.execute(
@@ -278,3 +282,77 @@ def check_alerts(current_data: dict[str, dict[str, Any]]) -> list[dict]:
             })
 
     return triggered
+
+
+# ── Daily VaR check ───────────────────────────────────────────────────────────
+
+def run_var_check(var_threshold: float = 0.03) -> dict | None:
+    """
+    Read recent portfolio values from the DB (last 252 trading days) and
+    compute risk metrics.  If VaR 95% exceeds *var_threshold*, fire an alert
+    via the broadcast channel and return the triggered result dict.
+
+    Parameters
+    ----------
+    var_threshold : float
+        Fractional daily VaR threshold (default 0.03 = 3 %).
+
+    Returns
+    -------
+    dict with risk metrics if the threshold was breached, else None.
+    """
+    from analysis.risk_metrics import compute_risk_metrics
+
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            """
+            SELECT total_value
+            FROM   paper_portfolio_snapshots
+            ORDER  BY recorded_at DESC
+            LIMIT  252
+            """
+        ).fetchall()
+    except Exception as exc:
+        logger.debug("VaR check: could not read snapshots (%s), falling back.", exc)
+        rows = []
+    finally:
+        conn.close()
+
+    if not rows:
+        logger.info("VaR check: no portfolio snapshot data available.")
+        return None
+
+    # Snapshots are newest-first; reverse so oldest-first for the calc.
+    values = [float(r[0]) for r in reversed(rows)]
+    rm = compute_risk_metrics(values)
+    if rm is None:
+        logger.info("VaR check: insufficient data (%d values).", len(values))
+        return None
+
+    logger.info(
+        "VaR check: VaR95=%.4f VaR99=%.4f CVaR95=%.4f ann_vol=%.4f n=%d",
+        rm.var_95, rm.var_99, rm.cvar_95, rm.volatility_annual, rm.n_observations,
+    )
+
+    if rm.var_95 > var_threshold:
+        msg = (
+            f"Portfolio VaR alert: 95% daily VaR = {rm.var_95 * 100:.2f}% "
+            f"exceeds threshold of {var_threshold * 100:.2f}%. "
+            f"Ann. volatility = {rm.volatility_annual:.2f}%, "
+            f"CVaR 95% = {rm.cvar_95 * 100:.2f}%."
+        )
+        logger.warning("VAR ALERT: %s", msg)
+        _notify("VaR Alert", msg)
+        broadcast(subject="VaR Alert: threshold breached", body=msg)
+        return {
+            "var_95":            rm.var_95,
+            "var_99":            rm.var_99,
+            "cvar_95":           rm.cvar_95,
+            "cvar_99":           rm.cvar_99,
+            "volatility_annual": rm.volatility_annual,
+            "n_observations":    rm.n_observations,
+            "message":           msg,
+        }
+
+    return None

@@ -2,10 +2,9 @@
 Quant Platform — Main Streamlit Entry Point
 Run with: streamlit run app.py
 """
-import logging
-
 import streamlit as st
 
+import config
 from broker.paper_trader import init_paper_tables
 from data.db import init_db
 from journal.trading_journal import init_journal_table
@@ -14,6 +13,7 @@ from pages import (
     backtest,
     chart,
     efficient_frontier,
+    greeks,
     journal_tab,
     portfolio,
     screener,
@@ -22,7 +22,7 @@ from pages import (
 from scheduler.alerts import init_alerts_table
 
 # ── App bootstrap ─────────────────────────────────────────────────────────────
-logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+config.configure_logging()
 init_db()
 init_paper_tables()
 init_alerts_table()
@@ -37,8 +37,8 @@ st.set_page_config(
 
 shared.render_sidebar()
 
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
-    "📈 Chart", "🔬 Backtest", "🔍 Screener", "💼 Portfolio", "🔔 Alerts", "📓 Journal", "📐 Efficient Frontier"
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+    "📈 Chart", "🔬 Backtest", "🔍 Screener", "💼 Portfolio", "🔔 Alerts", "📓 Journal", "📐 Efficient Frontier", "🧮 Greeks"
 ])
 with tab1:
     chart.render()
@@ -54,3 +54,5 @@ with tab6:
     journal_tab.render()
 with tab7:
     efficient_frontier.render()
+with tab8:
+    greeks.render()

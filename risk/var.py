@@ -3,14 +3,16 @@
 import numpy as np
 import pandas as pd
 
+try:
+    from scipy import stats as _scipy_stats
+except ImportError:
+    _scipy_stats = None
+
 
 def _norm_ppf(p: float) -> float:
     """Rational approximation of the normal quantile function (Beasley-Springer-Moro)."""
-    try:
-        from scipy import stats
-        return float(stats.norm.ppf(p))
-    except ImportError:
-        pass
+    if _scipy_stats is not None:
+        return float(_scipy_stats.norm.ppf(p))
     # Abramowitz & Stegun approximation, good to ~4.5e-4
     a = [2.515517, 0.802853, 0.010328]
     b = [1.432788, 0.189269, 0.001308]

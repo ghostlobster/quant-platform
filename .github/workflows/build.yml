@@ -1,0 +1,61 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  test-and-build:
+    name: Test & Docker Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest-cov
+
+      - name: Run full test suite
+        continue-on-error: false
+        run: |
+          pytest tests/ -v \
+            --cov=. \
+            --cov-report=xml:coverage.xml \
+            --cov-report=term-missing \
+            --junitxml=test-results.xml
+
+      - name: Build Docker image
+        run: docker build . --tag quant-platform:${{ github.sha }} --tag quant-platform:latest
+
+      - name: Validate docker-compose config
+        run: |
+          # Create a stub .env so docker-compose config doesn't warn about missing file
+          touch .env
+          docker-compose config --quiet
+
+      - name: Upload test results and coverage
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: build-test-results
+          path: |
+            coverage.xml
+            test-results.xml
