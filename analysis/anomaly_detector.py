@@ -252,10 +252,10 @@ class AnomalyDetector:
             ).fetchall()
             conn.close()
             if rows and len(rows) >= 2:
-                paper_values = [float(r[0]) for r in reversed(rows)]
-                paper_pnl = [paper_values[i] - paper_values[i - 1] for i in range(1, len(paper_values))]
-                # Without a separate live account we skip this check
-                # (it activates when a live broker is connected)
+                # Without a separate live account we skip this check.
+                # When a live broker is connected, call check_pnl_divergence() directly
+                # with both live and paper P&L series.
+                pass
         except Exception:
             pass
 

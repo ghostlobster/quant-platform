@@ -1,8 +1,6 @@
 """Tests for monitoring/metrics.py (Issue #30)."""
 from __future__ import annotations
 
-import pytest
-
 
 def test_module_imports_without_prometheus():
     """metrics.py should import cleanly even when prometheus-client is absent."""

@@ -1,10 +1,6 @@
 """Tests for agents/meta_agent.py (Issue #38)."""
 from __future__ import annotations
 
-import os
-
-import pytest
-
 from agents.base import AgentSignal
 
 
@@ -112,8 +108,9 @@ def test_meta_agent_confidence_in_valid_range():
 
 
 def test_meta_agent_failing_agent_is_skipped():
-    from agents.meta_agent import MetaAgent
     from unittest.mock import MagicMock
+
+    from agents.meta_agent import MetaAgent
 
     bad_agent = MagicMock()
     bad_agent.name = "failing_agent"

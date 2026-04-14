@@ -19,12 +19,7 @@ from utils.logger import get_logger
 logger = get_logger(__name__)
 
 try:
-    from prometheus_client import (  # type: ignore[import]
-        Counter,
-        Gauge,
-        Histogram,
-        REGISTRY,
-    )
+    import prometheus_client  # type: ignore[import]  # noqa: F401
     _PROM_AVAILABLE = True
 except ImportError:
     _PROM_AVAILABLE = False

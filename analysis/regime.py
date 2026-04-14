@@ -253,8 +253,8 @@ def _blend_regimes(
     ]
     # Weighted blend
     blended = [
-        (1.0 - weight) * q + weight * l
-        for q, l in zip(q_vec, l_vec)
+        (1.0 - weight) * q_val + weight * llm_val
+        for q_val, llm_val in zip(q_vec, l_vec)
     ]
     best_idx = blended.index(max(blended))
     return REGIME_STATES[best_idx]

@@ -6,7 +6,6 @@ import time
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
-import pytest
 
 # Ensure yfinance is available as a mock so data.fetcher can be imported
 _yf_mock = MagicMock()

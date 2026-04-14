@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock
 
 import pytest
 

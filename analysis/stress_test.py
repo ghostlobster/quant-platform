@@ -224,15 +224,16 @@ def generate_llm_scenarios(
     )
 
     try:
-        from providers.llm import get_llm
         import json
+
+        from providers.llm import get_llm
         llm = get_llm()
         raw = llm.complete(prompt)
         # Strip markdown code fences
         text = raw.strip()
         if text.startswith("```"):
             lines = text.splitlines()
-            text = "\n".join(l for l in lines if not l.startswith("```")).strip()
+            text = "\n".join(line for line in lines if not line.startswith("```")).strip()
         items = json.loads(text)
         scenarios = []
         for item in items:

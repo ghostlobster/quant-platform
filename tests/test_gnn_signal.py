@@ -105,7 +105,7 @@ def test_gnn_signal_fallback_score_empty_tickers():
 
 
 def test_gnn_signal_fallback_handles_all_known_tickers():
-    from strategies.gnn_signal import GNNSignal, TICKER_SECTOR
+    from strategies.gnn_signal import TICKER_SECTOR, GNNSignal
 
     gnn = GNNSignal(model_path="/no/model.pt")
     tickers = list(TICKER_SECTOR.keys())

@@ -30,7 +30,6 @@ class MockOptionsFlowAdapter:
         flow = self.get_flow(symbol)
         call_vol = sum(r["volume"] for r in flow if r["side"] == "call")
         put_vol = sum(r["volume"] for r in flow if r["side"] == "put")
-        total = call_vol + put_vol or 1
         ratio = call_vol / put_vol if put_vol > 0 else 2.0
         baseline = 1.0
         unusual = ratio > 1.5 or ratio < 0.67

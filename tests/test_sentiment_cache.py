@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import sqlite3
 import time
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -91,7 +91,6 @@ def test_cache_expired_returns_none(mock_conn):
     )
     mock_conn.commit()
     with _patch_conn(mock_conn):
-        from importlib import reload
         import adapters.sentiment.cache as cache_mod
         result = cache_mod.cache_read("MSFT", "stocktwits", ttl=1800)
     assert result is None

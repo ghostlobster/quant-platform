@@ -69,7 +69,7 @@ def test_mock_adapter_metrics_stored():
 
     reg = MockModelRegistryAdapter()
     metrics = {"sharpe": 1.8, "win_rate": 0.62}
-    run_id = reg.log_model("my_model", "/path/to/model", metrics, tags={"env": "prod"})
+    reg.log_model("my_model", "/path/to/model", metrics, tags={"env": "prod"})
 
     models = reg.list_models()
     assert len(models) == 1

@@ -21,7 +21,10 @@ from __future__ import annotations
 import os
 import sqlite3
 import time
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from adapters.execution_algo.result import ExecutionResult
 
 import pandas as pd
 from dotenv import load_dotenv
@@ -488,7 +491,6 @@ def execute_algo(
     ExecutionResult with fill details and slippage metrics.
     """
     from adapters.broker.paper_adapter import PaperBrokerAdapter
-    from adapters.execution_algo.result import ExecutionResult
     from providers.execution_algo import get_execution_algo
 
     execution_algo_inst = get_execution_algo(algo)

@@ -17,7 +17,7 @@ from __future__ import annotations
 import os
 
 try:
-    from fastapi import FastAPI, Response  # type: ignore[import]
+    from fastapi import FastAPI  # type: ignore[import]
     from fastapi.responses import PlainTextResponse  # type: ignore[import]
     _FASTAPI_AVAILABLE = True
 except ImportError:
@@ -57,7 +57,7 @@ def _get_metrics_text() -> str:
         logger.debug("Metrics refresh: regime update failed: %s", exc)
 
     try:
-        from prometheus_client import generate_latest, CONTENT_TYPE_LATEST  # type: ignore
+        from prometheus_client import generate_latest  # type: ignore
         return generate_latest().decode("utf-8")
     except ImportError:
         return "# prometheus-client not installed\n"
