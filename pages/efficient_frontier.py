@@ -4,14 +4,13 @@ pages/efficient_frontier.py — Markowitz Efficient Frontier + Portfolio Rebalan
 import pandas as pd
 import streamlit as st
 
-from data.fetcher import fetch_ohlcv, fetch_latest_price
+from data.fetcher import fetch_latest_price, fetch_ohlcv
 from risk.markowitz import (
     build_efficient_frontier_chart,
     get_max_sharpe_portfolio,
     get_min_volatility_portfolio,
 )
 from strategies.rebalancer import compute_rebalance_trades, rebalance_summary
-
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 

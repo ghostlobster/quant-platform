@@ -2,7 +2,7 @@
 import sqlite3
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
@@ -12,9 +12,8 @@ import pytest
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
-from backtester.walk_forward import WalkForwardResult
-from backtester.engine import BacktestResult
-
+from backtester.engine import BacktestResult  # noqa: E402
+from backtester.walk_forward import WalkForwardResult  # noqa: E402
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 

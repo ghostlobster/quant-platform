@@ -1,0 +1,6 @@
+line-length = 100
+
+[lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]
+exclude = [".git", "__pycache__", "*.egg-info"]

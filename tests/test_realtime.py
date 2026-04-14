@@ -2,18 +2,16 @@
 Tests for data/realtime.py.
 All network I/O (yfinance, websockets) is mocked — no real connections.
 """
-import sys
 import os
+import sys
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 import threading
 import time
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from data.realtime import Quote, RealtimeFeed, create_feed
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -253,3 +251,106 @@ class TestThreadSafety:
             t.join(timeout=5)
 
         assert errors == []
+
+
+# ---------------------------------------------------------------------------
+# Test: _ensure_thread skips start when stop_event is already set
+# ---------------------------------------------------------------------------
+
+class TestEnsureThread:
+    def test_ensure_thread_noop_when_stopped(self):
+        """If stop_event is set before _ensure_thread, no thread is started."""
+        feed = RealtimeFeed(_mode='polling', _poll_interval=60)
+        feed._stop_event.set()
+        feed._ensure_thread()
+        assert feed._thread is None
+
+
+# ---------------------------------------------------------------------------
+# Test: polling exception handler — bad yfinance data must not crash the loop
+# ---------------------------------------------------------------------------
+
+class TestPollingExceptions:
+    def test_polling_exception_does_not_stop_loop(self):
+        """An exception inside the per-ticker poll must not kill the thread."""
+        feed = RealtimeFeed(_mode='polling', _poll_interval=0.05)
+        call_count = {"n": 0}
+
+        def bad_ticker(*args, **kwargs):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                raise RuntimeError("yfinance flaked")
+            good = MagicMock()
+            good.fast_info.last_price = 100.0
+            good.fast_info.last_volume = 500
+            return good
+
+        with patch('yfinance.Ticker', side_effect=bad_ticker):
+            feed.subscribe(['AAPL'])
+            deadline = time.time() + 2.0
+            while time.time() < deadline:
+                if feed.get_all_quotes():
+                    break
+                time.sleep(0.05)
+
+        feed.stop()
+        # Thread must have survived the first exception and produced a quote
+        assert 'AAPL' in feed.get_all_quotes()
+
+
+# ---------------------------------------------------------------------------
+# Test: _alpaca_auth_ok handles both list and dict formats
+# ---------------------------------------------------------------------------
+
+class TestAlpacaAuthOk:
+    def test_auth_ok_with_list(self):
+        msg = [{"T": "success", "msg": "authenticated"}]
+        assert RealtimeFeed._alpaca_auth_ok(msg) is True
+
+    def test_auth_ok_with_dict(self):
+        msg = {"T": "success", "msg": "authenticated"}
+        assert RealtimeFeed._alpaca_auth_ok(msg) is True
+
+    def test_auth_failed_with_list(self):
+        msg = [{"T": "error", "msg": "forbidden"}]
+        assert RealtimeFeed._alpaca_auth_ok(msg) is False
+
+    def test_auth_failed_with_dict(self):
+        msg = {"T": "error", "msg": "forbidden"}
+        assert RealtimeFeed._alpaca_auth_ok(msg) is False
+
+    def test_auth_empty_list(self):
+        assert RealtimeFeed._alpaca_auth_ok([]) is False
+
+
+# ---------------------------------------------------------------------------
+# Test: _run_alpaca_ws falls back to polling on connection error
+# ---------------------------------------------------------------------------
+
+class TestAlpacaWsFallback:
+    def test_ws_failure_falls_back_to_polling(self):
+        """If the websocket loop raises, _run_alpaca_ws falls back to polling."""
+        feed = RealtimeFeed(_mode='alpaca', _poll_interval=0.05)
+
+        mock_ticker = MagicMock()
+        mock_ticker.fast_info.last_price = 42.0
+        mock_ticker.fast_info.last_volume = 100
+
+        with patch.object(feed, '_alpaca_ws_loop',
+                          side_effect=ConnectionError("ws refused")), \
+             patch('yfinance.Ticker', return_value=mock_ticker):
+            # Launch _run_alpaca_ws in a thread; it should fall back to polling
+            t = threading.Thread(target=feed._run_alpaca_ws, daemon=True)
+            t.start()
+            deadline = time.time() + 3.0
+            while time.time() < deadline:
+                # poke a ticker so polling has something to fetch
+                with feed._lock:
+                    feed._tickers.add('SPY')
+                if feed.get_all_quotes():
+                    break
+                time.sleep(0.05)
+            feed.stop()
+            t.join(timeout=3)
+
+        assert feed._mode == 'polling'
