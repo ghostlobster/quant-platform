@@ -1,0 +1,1 @@
+# adapters/sentiment — SentimentProvider implementations.
