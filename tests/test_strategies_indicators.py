@@ -4,21 +4,20 @@ Tests for strategies/indicators.py
 Covers: add_rsi, add_macd, add_bollinger_bands, add_ema, add_volume_sma,
         add_all, _latest, generate_signals.
 """
-import pandas as pd
 import numpy as np
+import pandas as pd
 import pytest
 
 from strategies.indicators import (
-    add_rsi,
-    add_macd,
+    _latest,
+    add_all,
     add_bollinger_bands,
     add_ema,
+    add_macd,
+    add_rsi,
     add_volume_sma,
-    add_all,
-    _latest,
     generate_signals,
 )
-
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 

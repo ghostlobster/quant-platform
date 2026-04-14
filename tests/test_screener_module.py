@@ -6,20 +6,20 @@ filter logic, signal assignment, and the public run_screen() API.
 """
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
+
 import numpy as np
 import pandas as pd
 import pytest
 
 from screener.screener import (
-    UNIVERSE,
     TICKERS,
-    _compute_sma,
+    UNIVERSE,
     _compute_metrics,
+    _compute_sma,
     _fetch_batch,
     run_screen,
 )
-
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 

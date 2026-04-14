@@ -1,9 +1,10 @@
 """Pairs trading strategy based on cointegration and z-score mean reversion."""
+import logging
+from dataclasses import dataclass
+from typing import Optional, Tuple
+
 import numpy as np
 import pandas as pd
-from dataclasses import dataclass, field
-from typing import Optional, Tuple, List
-import logging
 
 logger = logging.getLogger(__name__)
 

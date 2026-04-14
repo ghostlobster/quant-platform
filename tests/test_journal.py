@@ -12,10 +12,9 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-import data.db as db_module
 import broker.paper_trader as pt
+import data.db as db_module
 import journal.trading_journal as jt
-
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 

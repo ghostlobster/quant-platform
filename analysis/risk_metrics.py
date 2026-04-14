@@ -1,91 +1,95 @@
-"""Portfolio risk metrics: VaR, CVaR, and stress statistics."""
+"""VaR, CVaR (Expected Shortfall) and portfolio risk metrics."""
 from __future__ import annotations
+
 import math
 import random
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Sequence
 
-from utils.logger import get_logger
-
-logger = get_logger(__name__)
+import numpy as np
 
 
 @dataclass
 class RiskMetrics:
-    var_95: float          # 1-day VaR at 95% confidence (positive number = loss)
-    var_99: float          # 1-day VaR at 99% confidence
-    cvar_95: float         # CVaR / Expected Shortfall at 95%
-    cvar_99: float         # CVaR at 99%
-    worst_day_pct: float   # worst single-day % loss in lookback window
-    best_day_pct: float    # best single-day % gain
-    volatility_annual: float  # annualised daily volatility
-    n_observations: int    # number of return observations used
+    var_95: float
+    var_99: float
+    cvar_95: float
+    cvar_99: float
+    worst_day_pct: float
+    best_day_pct: float
+    volatility_annual: float
+    n_observations: int
 
 
-def historical_var(returns: list[float], confidence: float = 0.95) -> float:
-    """Historical simulation VaR. Returns positive loss value."""
+def _pct_returns(portfolio_values: Sequence[float]) -> list[float]:
+    """Convert a series of portfolio values to daily % returns."""
+    vals = list(portfolio_values)
+    if len(vals) < 2:
+        return []
+    return [(vals[i] - vals[i - 1]) / vals[i - 1] for i in range(1, len(vals))]
+
+
+def historical_var(returns: Sequence[float], confidence: float = 0.95) -> float:
+    """Historical simulation VaR at given confidence level.
+    Returns a positive number representing the loss at the given confidence level.
+    e.g. 0.02 means 2% loss at the VaR threshold.
+    """
     if not returns:
         return 0.0
     sorted_r = sorted(returns)
-    index = int((1 - confidence) * len(sorted_r))
-    return -sorted_r[max(index, 0)]
+    idx = int(math.floor((1 - confidence) * len(sorted_r)))
+    idx = max(0, min(idx, len(sorted_r) - 1))
+    return -sorted_r[idx]
 
 
-def historical_cvar(returns: list[float], confidence: float = 0.95) -> float:
-    """CVaR (Expected Shortfall): average of losses beyond VaR."""
+def historical_cvar(returns: Sequence[float], confidence: float = 0.95) -> float:
+    """Historical CVaR (Expected Shortfall) — mean of losses beyond VaR threshold."""
     if not returns:
         return 0.0
     sorted_r = sorted(returns)
-    cutoff = int((1 - confidence) * len(sorted_r))
-    tail = sorted_r[:max(cutoff, 1)]
+    cutoff = int(math.floor((1 - confidence) * len(sorted_r)))
+    cutoff = max(1, cutoff)
+    tail = sorted_r[:cutoff]
     return -sum(tail) / len(tail)
 
 
 def monte_carlo_var(
-    returns: list[float],
+    returns: Sequence[float],
     n_sims: int = 10_000,
     confidence: float = 0.95,
     seed: int = 42,
 ) -> float:
-    """Monte Carlo VaR using bootstrapped returns."""
+    """Monte Carlo VaR via bootstrap resampling of historical returns."""
     if not returns:
         return 0.0
     rng = random.Random(seed)
-    simulated = [rng.choice(returns) for _ in range(n_sims)]
-    return historical_var(simulated, confidence)
+    returns_list = list(returns)
+    simulated = [rng.choice(returns_list) for _ in range(n_sims)]
+    simulated.sort()
+    idx = int(math.floor((1 - confidence) * n_sims))
+    idx = max(0, min(idx, n_sims - 1))
+    return -simulated[idx]
 
 
 def compute_risk_metrics(
-    portfolio_values: list[float],
-    confidence_levels: tuple[float, ...] = (0.95, 0.99),
+    portfolio_values: Sequence[float],
+    confidence_levels: tuple[float, float] = (0.95, 0.99),
 ) -> Optional[RiskMetrics]:
-    """Compute full risk metrics from a time-series of portfolio NAV values."""
-    if len(portfolio_values) < 10:
-        logger.warning("risk_metrics.insufficient_data n=%d", len(portfolio_values))
+    """Compute a full RiskMetrics snapshot from a portfolio value series."""
+    returns = _pct_returns(portfolio_values)
+    if len(returns) < 5:
         return None
 
-    returns = [
-        (portfolio_values[i] - portfolio_values[i - 1]) / portfolio_values[i - 1]
-        for i in range(1, len(portfolio_values))
-    ]
-
-    var_95 = historical_var(returns, 0.95)
-    var_99 = historical_var(returns, 0.99)
-    cvar_95 = historical_cvar(returns, 0.95)
-    cvar_99 = historical_cvar(returns, 0.99)
-
-    mean = sum(returns) / len(returns)
-    variance = sum((r - mean) ** 2 for r in returns) / len(returns)
-    vol_daily = math.sqrt(variance)
-    vol_annual = vol_daily * math.sqrt(252)
+    c_lo, c_hi = confidence_levels
+    ann_vol = float(np.std(returns, ddof=1)) * math.sqrt(252) if len(returns) > 1 else 0.0
 
     return RiskMetrics(
-        var_95=var_95,
-        var_99=var_99,
-        cvar_95=cvar_95,
-        cvar_99=cvar_99,
+        var_95=historical_var(returns, c_lo),
+        var_99=historical_var(returns, c_hi),
+        cvar_95=historical_cvar(returns, c_lo),
+        cvar_99=historical_cvar(returns, c_hi),
         worst_day_pct=min(returns) * 100,
         best_day_pct=max(returns) * 100,
-        volatility_annual=vol_annual * 100,
+        volatility_annual=ann_vol * 100,
         n_observations=len(returns),
     )

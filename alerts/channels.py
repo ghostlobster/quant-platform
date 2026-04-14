@@ -19,16 +19,16 @@ Public API
 """
 from __future__ import annotations
 
-import logging
 import os
 import smtplib
-import socket
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.mime.text import MIMEText
 from typing import Protocol
 
-logger = logging.getLogger(__name__)
+import structlog
+
+logger = structlog.get_logger(__name__)
 
 
 # ── Protocol ──────────────────────────────────────────────────────────────────
@@ -49,9 +49,9 @@ class TelegramChannel:
     def send(self, subject: str, body: str) -> bool:
         """POST to Telegram Bot API. Never raises; returns False on failure."""
         try:
-            import urllib.request
-            import urllib.parse
             import json
+            import urllib.parse
+            import urllib.request
 
             text = f"*{subject}*\n{body}"
             url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
@@ -113,8 +113,8 @@ class WebhookChannel:
     def send(self, subject: str, body: str) -> bool:
         """POST JSON payload to webhook URL. Never raises; returns False on failure."""
         try:
-            import urllib.request
             import json
+            import urllib.request
 
             payload = json.dumps({
                 "subject": subject,

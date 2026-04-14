@@ -2176,3 +2176,5 @@ RuntimeError: boom
 2026-04-11 23:14:54,697  INFO      analysis.regime  get_live_regime: fetching SPY and ^VIX from yfinance
 2026-04-11 23:20:54,704  INFO      analysis.regime  get_live_regime: fetching SPY and ^VIX from yfinance
 2026-04-11 23:26:26,103  INFO      analysis.regime  get_live_regime: fetching SPY and ^VIX from yfinance
+2026-04-13 01:19:38,611  WARNING   analysis.risk_metrics  risk_metrics.insufficient_data n=9
+2026-04-13 01:19:38,612  WARNING   analysis.risk_metrics  risk_metrics.insufficient_data n=9
