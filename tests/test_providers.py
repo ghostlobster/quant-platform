@@ -49,7 +49,7 @@ class TestLLMProvider:
 
     def test_env_var_wiring(self, monkeypatch):
         monkeypatch.setenv("LLM_PROVIDER", "mock")
-        from providers.llm import get_llm, LLMProvider
+        from providers.llm import LLMProvider, get_llm
         llm = get_llm()  # no args — reads env var
         assert isinstance(llm, LLMProvider)
 
@@ -278,16 +278,16 @@ class TestExecutionAlgoProvider:
 
 class TestTSDBProvider:
     def test_sqlite_adapter_satisfies_protocol(self, tmp_path):
-        from providers.tsdb import TSDBProvider
         from adapters.tsdb.sqlite_adapter import SQLiteTSDBAdapter
+        from providers.tsdb import TSDBProvider
         db = SQLiteTSDBAdapter(path=str(tmp_path / "test.db"))
         assert isinstance(db, TSDBProvider)
         db.close()
 
     def test_sqlite_write_and_query(self, tmp_path):
-        from adapters.tsdb.sqlite_adapter import SQLiteTSDBAdapter
         # Each test needs its own connection (module-level singleton would bleed across)
         import adapters.tsdb.sqlite_adapter as mod
+        from adapters.tsdb.sqlite_adapter import SQLiteTSDBAdapter
         orig = mod._connection
         mod._connection = None
         try:
@@ -319,8 +319,8 @@ class TestFeatureStoreProvider:
         assert isinstance(fs, FeatureStoreProvider)
 
     def test_memory_set_and_get(self):
-        from providers.feature_store import get_feature_store
         import adapters.feature_store.memory_adapter as mod
+        from providers.feature_store import get_feature_store
         # Isolate from other tests by clearing the shared store
         mod._store.clear()
         fs = get_feature_store("memory")
@@ -331,8 +331,8 @@ class TestFeatureStoreProvider:
         assert "missing" not in result
 
     def test_memory_list_features(self):
-        from providers.feature_store import get_feature_store
         import adapters.feature_store.memory_adapter as mod
+        from providers.feature_store import get_feature_store
         mod._store.clear()
         fs = get_feature_store("memory")
         fs.set_features("SPY", {"vol_20": 0.15})
@@ -353,13 +353,13 @@ class TestProtocolRuntimeCheck:
     """Verify runtime_checkable isinstance works for all 7 protocols."""
 
     def test_all_mock_adapters_pass_isinstance(self):
-        from providers.llm import LLMProvider, get_llm
-        from providers.market_data import MarketDataProvider, get_market_data
-        from providers.broker import BrokerProvider, get_broker
         from providers.alert import AlertProvider, get_alert_channel
-        from providers.sentiment import SentimentProvider, get_sentiment
+        from providers.broker import BrokerProvider, get_broker
         from providers.execution_algo import ExecutionAlgoProvider, get_execution_algo
         from providers.feature_store import FeatureStoreProvider, get_feature_store
+        from providers.llm import LLMProvider, get_llm
+        from providers.market_data import MarketDataProvider, get_market_data
+        from providers.sentiment import SentimentProvider, get_sentiment
 
         assert isinstance(get_llm("mock"), LLMProvider)
         assert isinstance(get_market_data("mock"), MarketDataProvider)
