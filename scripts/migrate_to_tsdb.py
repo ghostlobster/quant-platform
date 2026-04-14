@@ -182,7 +182,7 @@ def migrate_portfolio_history(src_conn, tsdb) -> int:
 
 def main(provider: str | None = None) -> None:
     """Run all migrations from quant.db → configured TSDB."""
-    from data.db import get_connection, _DB_PATH
+    from data.db import _DB_PATH, get_connection
     from providers.tsdb import get_tsdb
 
     log.info("Starting TSDB migration", source=str(_DB_PATH), provider=provider or "env")

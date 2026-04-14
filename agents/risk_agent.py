@@ -21,8 +21,8 @@ class RiskAgent:
         # Correlation check
         if len(positions) >= 2:
             try:
-                from risk.correlation import check_correlation_alerts
                 from data.fetcher import fetch_ohlcv
+                from risk.correlation import check_correlation_alerts
                 price_data = {}
                 for ticker in list(positions.keys())[:10]:
                     df = fetch_ohlcv(ticker, period="3mo")

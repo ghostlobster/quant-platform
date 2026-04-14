@@ -49,7 +49,7 @@ class ThetaDataAdapter:
 
     def get_flow(self, symbol: str, lookback_days: int = 1) -> list[dict]:
         data = self._get(
-            f"/options/trade",
+            "/options/trade",
             params={"root": symbol.upper(), "exp": "all", "days_back": lookback_days},
         )
         return data.get("response", []) if isinstance(data, dict) else []

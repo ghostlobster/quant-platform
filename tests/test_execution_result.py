@@ -39,6 +39,7 @@ def test_from_fills_multiple():
 
 def test_market_adapter_returns_execution_result():
     from unittest.mock import MagicMock
+
     from adapters.execution_algo.market_adapter import MarketAlgoAdapter
     from adapters.execution_algo.result import ExecutionResult
 

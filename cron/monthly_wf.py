@@ -114,8 +114,8 @@ def run() -> int:
     # Optional: retrain RL position sizer
     if os.getenv("RL_SIZER_RETRAIN", "0") == "1":
         try:
-            from journal.trading_journal import get_trades
             from analysis.rl_trainer import train as train_rl_sizer
+            from journal.trading_journal import get_trades
             trades = get_trades()
             if trades is not None and not trades.empty and "realised_pnl" in trades.columns:
                 closes = trades[trades.get("action", pd.Series()).str.upper() == "SELL"] \

@@ -20,11 +20,11 @@ import numpy as np
 import pandas as pd
 
 from analysis.rl_sizer import (
-    REGIME_STATES,
-    RLSizerObservation,
     _ACTION_HIGH,
     _ACTION_LOW,
     _OBS_DIM,
+    REGIME_STATES,
+    RLSizerObservation,
     _obs_to_array,
 )
 from utils.logger import get_logger

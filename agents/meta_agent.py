@@ -58,11 +58,11 @@ class MetaAgent:
         weights: dict[str, float] | None = None,
     ) -> None:
         if agents is None:
+            from agents.execution_agent import ExecutionAgent
             from agents.regime_agent import RegimeAgent
             from agents.risk_agent import RiskAgent
-            from agents.sentiment_agent import SentimentAgent
             from agents.screener_agent import ScreenerAgent
-            from agents.execution_agent import ExecutionAgent
+            from agents.sentiment_agent import SentimentAgent
             agents = [RegimeAgent(), RiskAgent(), SentimentAgent(), ScreenerAgent(), ExecutionAgent()]
         self._agents: list[AgentProvider] = agents
         self._weights = weights or _load_weights()
