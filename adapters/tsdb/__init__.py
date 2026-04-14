@@ -1,0 +1,1 @@
+# adapters/tsdb — TSDBProvider implementations.
