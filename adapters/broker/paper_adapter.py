@@ -1,29 +1,60 @@
-"""In-memory paper trading broker — no external dependencies."""
+"""
+adapters/broker/paper_adapter.py — BrokerProvider wrapping broker/paper_trader.py.
+
+No external dependency.  Uses the existing SQLite-backed paper trading engine.
+"""
 from __future__ import annotations
 
-import uuid
+import logging
+import threading
 from typing import Optional
+
+logger = logging.getLogger(__name__)
+
+# Thread-safe singleton init guard
+_init_lock = threading.Lock()
+_initialised = False
+
+
+def _ensure_init() -> None:
+    global _initialised
+    if _initialised:
+        return
+    with _init_lock:
+        if not _initialised:
+            from broker.paper_trader import init_paper_tables
+            init_paper_tables()
+            _initialised = True
 
 
 class PaperBrokerAdapter:
-    """Simple in-memory paper broker for testing and development."""
+    """BrokerProvider backed by the in-memory/SQLite paper trading engine."""
 
     def __init__(self) -> None:
-        self._cash: float = 100_000.0
-        self._positions: dict[str, dict] = {}
-        self._orders: dict[str, dict] = {}
+        _ensure_init()
+        self._orders: dict[str, dict] = {}  # local order store (in-memory)
+        self._order_counter = 0
+        self._lock = threading.Lock()
 
     def get_account_info(self) -> dict:
-        market_value = sum(p["qty"] * p["avg_price"] for p in self._positions.values())
-        return {
-            "cash": self._cash,
-            "buying_power": self._cash,
-            "equity": self._cash + market_value,
-            "market_value": market_value,
-        }
+        from broker.paper_trader import get_account
+        return get_account()
 
     def get_positions(self) -> list[dict]:
-        return list(self._positions.values())
+        from broker.paper_trader import get_portfolio
+        df = get_portfolio()
+        if df.empty:
+            return []
+        records = []
+        for _, row in df.iterrows():
+            records.append({
+                "symbol": row["Ticker"],
+                "qty": float(row["Shares"]),
+                "avg_entry_price": float(row["Avg Cost"]),
+                "market_value": float(row["Market Value"]),
+                "unrealized_pl": row.get("Unrealised P&L"),
+            })
+        return records
 
     def place_order(
         self,
@@ -33,47 +64,62 @@ class PaperBrokerAdapter:
         order_type: str = "market",
         limit_price: Optional[float] = None,
     ) -> dict:
-        fill_price = limit_price or 100.0  # mock fill at limit or $100
-        order_id = str(uuid.uuid4())
-        cost = qty * fill_price
+        from broker.paper_trader import buy, sell
+        # For paper trading we need a price — use limit_price or fetch live price.
+        price = limit_price
+        if price is None:
+            try:
+                from data.fetcher import fetch_latest_price
+                info = fetch_latest_price(symbol)
+                price = info.get("price") or 100.0
+            except Exception:
+                price = 100.0  # absolute fallback
 
-        if side == "buy":
-            self._cash -= cost
-            if symbol in self._positions:
-                pos = self._positions[symbol]
-                total_qty = pos["qty"] + qty
-                total_cost = pos["qty"] * pos["avg_price"] + cost
-                pos["qty"] = total_qty
-                pos["avg_price"] = total_cost / total_qty
+        with self._lock:
+            self._order_counter += 1
+            order_id = f"paper-{self._order_counter:06d}"
+
+        try:
+            if side.lower() == "buy":
+                fill = buy(symbol, qty, price)
+            elif side.lower() == "sell":
+                fill = sell(symbol, qty, price)
             else:
-                self._positions[symbol] = {"symbol": symbol, "qty": qty, "avg_price": fill_price}
-        elif side == "sell":
-            self._cash += cost
-            if symbol in self._positions:
-                pos = self._positions[symbol]
-                pos["qty"] -= qty
-                if pos["qty"] <= 0:
-                    del self._positions[symbol]
+                raise ValueError(f"side must be 'buy' or 'sell', got {side!r}")
+        except Exception as exc:
+            logger.error("Paper order failed: %s", exc)
+            return {
+                "order_id": order_id,
+                "symbol": symbol.upper(),
+                "qty": qty,
+                "side": side,
+                "order_type": order_type,
+                "status": "rejected",
+                "error": str(exc),
+            }
 
-        order = {
+        result = {
             "order_id": order_id,
-            "symbol": symbol,
+            "symbol": symbol.upper(),
             "qty": qty,
             "side": side,
-            "order_type": order_type,
+            "order_type": "market",
             "status": "filled",
-            "filled_avg_price": fill_price,
+            "filled_avg_price": price,
+            **fill,
         }
-        self._orders[order_id] = order
-        return order
+        with self._lock:
+            self._orders[order_id] = result
+        return result
 
     def cancel_order(self, order_id: str) -> bool:
-        if order_id in self._orders:
-            self._orders[order_id]["status"] = "cancelled"
-            return True
+        # Paper orders fill immediately — nothing to cancel.
+        logger.debug("PaperBrokerAdapter.cancel_order: paper orders fill instantly; no-op")
         return False
 
     def get_orders(self, status: str = "open") -> list[dict]:
+        with self._lock:
+            orders = list(self._orders.values())
         if status == "all":
-            return list(self._orders.values())
-        return [o for o in self._orders.values() if o["status"] == status]
+            return orders
+        return [o for o in orders if o.get("status") == status]

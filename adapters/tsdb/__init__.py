@@ -1,1 +1,1 @@
-# adapters/tsdb — time-series database adapters
+# adapters/tsdb — TSDBProvider implementations.

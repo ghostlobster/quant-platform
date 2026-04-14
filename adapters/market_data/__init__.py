@@ -1,1 +1,1 @@
-# adapters/market_data — market data provider adapters
+# adapters/market_data — MarketDataProvider implementations.

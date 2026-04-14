@@ -1,1 +1,1 @@
-# adapters/broker — broker provider adapters
+# adapters/broker — BrokerProvider implementations.

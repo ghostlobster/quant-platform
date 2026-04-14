@@ -1,1 +1,1 @@
-# adapters/alert — alert provider adapters
+# adapters/alert — AlertProvider implementations.

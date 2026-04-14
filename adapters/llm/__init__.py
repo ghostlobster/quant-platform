@@ -1,1 +1,1 @@
-# adapters/llm — LLM provider adapters
+# adapters/llm — LLMProvider implementations.

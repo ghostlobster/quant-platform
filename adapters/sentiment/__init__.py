@@ -1,1 +1,1 @@
-# adapters/sentiment — sentiment provider adapters
+# adapters/sentiment — SentimentProvider implementations.
