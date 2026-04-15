@@ -16,6 +16,7 @@ Optional dependencies (guarded):
 """
 from __future__ import annotations
 
+import math
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -105,6 +106,9 @@ class RLPositionSizer:
             arr = _obs_to_array(obs)
             action, _ = self._model.predict(arr, deterministic=True)
             multiplier = float(np.clip(action, _ACTION_LOW, _ACTION_HIGH))
+            if math.isnan(multiplier):
+                logger.warning("RL sizer: model returned NaN; using Kelly fallback")
+                return self._kelly_fallback(obs)
             logger.debug("RL sizer: obs=%s → multiplier=%.3f", obs, multiplier)
             return multiplier
         except Exception as exc:

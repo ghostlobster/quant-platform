@@ -8,24 +8,28 @@ Or via docker-compose (see docker-compose.yml metrics service).
 
 ENV vars
 --------
-    METRICS_PORT   port to listen on (default: 9090)
+    METRICS_PORT    port to listen on (default: 9090)
+    METRICS_TOKEN   bearer token required to scrape /metrics (optional but recommended)
 
 Requires (optional): pip install fastapi>=0.110.0 uvicorn>=0.29.0 prometheus-client>=0.19.0
 """
 from __future__ import annotations
 
 import os
+import secrets
+
+from utils.logger import get_logger
 
 try:
-    from fastapi import FastAPI  # type: ignore[import]
+    from fastapi import FastAPI, HTTPException, Request  # type: ignore[import]
     from fastapi.responses import PlainTextResponse  # type: ignore[import]  # pragma: no cover
     _FASTAPI_AVAILABLE = True  # pragma: no cover
 except ImportError:
     _FASTAPI_AVAILABLE = False
 
-from utils.logger import get_logger
-
 logger = get_logger(__name__)
+
+_METRICS_TOKEN: str = os.environ.get("METRICS_TOKEN", "")
 
 app = FastAPI(title="quant-platform metrics", docs_url=None, redoc_url=None) \
     if _FASTAPI_AVAILABLE else None  # type: ignore[assignment]
@@ -65,8 +69,13 @@ def _get_metrics_text() -> str:  # pragma: no cover
 
 if _FASTAPI_AVAILABLE and app is not None:  # pragma: no cover
     @app.get("/metrics", response_class=PlainTextResponse)
-    async def metrics_endpoint():
-        """Prometheus scrape endpoint."""
+    async def metrics_endpoint(request: Request):
+        """Prometheus scrape endpoint. Protected by METRICS_TOKEN when set."""
+        if _METRICS_TOKEN:
+            auth = request.headers.get("Authorization", "")
+            provided = auth.removeprefix("Bearer ").strip()
+            if not secrets.compare_digest(provided, _METRICS_TOKEN):
+                raise HTTPException(status_code=401, detail="Unauthorized")
         text = _get_metrics_text()
         return PlainTextResponse(
             content=text,

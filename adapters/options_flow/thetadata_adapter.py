@@ -20,22 +20,28 @@ from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-_BASE_URL = os.environ.get("THETADATA_BASE_URL", "https://api.thetadata.us/v2")
-_API_KEY = os.environ.get("THETADATA_API_KEY", "")
+_DEFAULT_BASE_URL = "https://api.thetadata.us/v2"
 
 
 class ThetaDataAdapter:
     """OptionsFlowProvider backed by ThetaData REST API."""
 
+    def __init__(self) -> None:
+        # Read credentials at instantiation time so the env is fully loaded
+        self._base_url = os.environ.get("THETADATA_BASE_URL", _DEFAULT_BASE_URL)
+        self._api_key = os.environ.get("THETADATA_API_KEY", "")
+        if not self._api_key:
+            logger.warning("THETADATA_API_KEY is not set; requests will be unauthenticated")
+
     def _get(self, path: str, params: dict | None = None) -> Any:
-        url = f"{_BASE_URL}{path}"
+        url = f"{self._base_url}{path}"
         if params:
             qs = "&".join(f"{k}={v}" for k, v in params.items())
             url = f"{url}?{qs}"
         req = urllib.request.Request(
             url,
             headers={
-                "Authorization": f"Bearer {_API_KEY}",
+                "Authorization": f"Bearer {self._api_key}",
                 "Accept": "application/json",
                 "User-Agent": "quant-platform/1.0",
             },

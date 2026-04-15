@@ -18,6 +18,7 @@ Public API
 """
 from __future__ import annotations
 
+import math
 import os
 import sqlite3
 import time
@@ -132,10 +133,10 @@ def buy(ticker: str, shares: float, price: float) -> dict:
     shares = float(shares)
     price  = float(price)
 
-    if shares <= 0:
-        raise ValueError("Shares must be greater than 0.")
-    if price <= 0:
-        raise ValueError("Price must be greater than 0.")
+    if math.isnan(shares) or math.isinf(shares) or shares <= 0:
+        raise ValueError("Shares must be a finite positive number.")
+    if math.isnan(price) or math.isinf(price) or price <= 0:
+        raise ValueError("Price must be a finite positive number.")
 
     total_cost = round(shares * price, 4)
 
@@ -245,10 +246,10 @@ def sell(ticker: str, shares: float, price: float) -> dict:
     shares  = float(shares)
     price   = float(price)
 
-    if shares <= 0:
-        raise ValueError("Shares must be greater than 0.")
-    if price <= 0:
-        raise ValueError("Price must be greater than 0.")
+    if math.isnan(shares) or math.isinf(shares) or shares <= 0:
+        raise ValueError("Shares must be a finite positive number.")
+    if math.isnan(price) or math.isinf(price) or price <= 0:
+        raise ValueError("Price must be a finite positive number.")
 
     conn = get_connection()
     try:
