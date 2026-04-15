@@ -9,9 +9,8 @@ import pytest
 
 from agents.base import AgentSignal
 
-# Ensure optional transitive deps are available as mocks so agents can import
+# Ensure yfinance is available as a mock so data.fetcher can be imported locally
 sys.modules.setdefault("yfinance", MagicMock())
-sys.modules.setdefault("ta", MagicMock())
 
 
 # ── RegimeAgent ────────────────────────────────────────────────────────────────
