@@ -1,6 +1,8 @@
 """agents/risk_agent.py — Specialist agent wrapping correlation & VaR checks."""
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 from agents.base import AgentSignal
 from utils.logger import get_logger
 
@@ -23,11 +25,24 @@ class RiskAgent:
             try:
                 from data.fetcher import fetch_ohlcv
                 from risk.correlation import check_correlation_alerts
-                price_data = {}
-                for ticker in list(positions.keys())[:10]:
-                    df = fetch_ohlcv(ticker, period="3mo")
-                    if not df.empty and "Close" in df.columns:
-                        price_data[ticker] = df["Close"]
+
+                tickers = list(positions.keys())[:10]
+
+                # Fetch all OHLCV series in parallel to avoid N+1 serial calls
+                price_data: dict = {}
+                with ThreadPoolExecutor(max_workers=min(5, len(tickers))) as pool:
+                    future_to_ticker = {
+                        pool.submit(fetch_ohlcv, t, "3mo"): t for t in tickers
+                    }
+                    for future in as_completed(future_to_ticker):
+                        t = future_to_ticker[future]
+                        try:
+                            df = future.result()
+                            if not df.empty and "Close" in df.columns:
+                                price_data[t] = df["Close"]
+                        except Exception as exc:
+                            logger.debug("RiskAgent: fetch failed for %s: %s", t, exc)
+
                 alerts = check_correlation_alerts(price_data, positions)
                 for alert in alerts:
                     warnings.append(alert.message)

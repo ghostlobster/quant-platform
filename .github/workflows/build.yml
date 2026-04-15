@@ -47,9 +47,9 @@ jobs:
 
       - name: Validate docker-compose config
         run: |
-          # Create a stub .env so docker-compose config doesn't warn about missing file
+          # Create a stub .env so docker compose config doesn't warn about missing file
           touch .env
-          docker-compose config --quiet
+          docker compose config --quiet
 
       - name: Upload test results and coverage
         uses: actions/upload-artifact@v4

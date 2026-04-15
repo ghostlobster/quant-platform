@@ -131,6 +131,7 @@ class MetaAgent:
                 reasoning = self._llm_arbitrate(signals, context, weighted_score, reasoning)
             except Exception as exc:
                 logger.warning("LLM arbiter failed: %s", exc)
+                reasoning = reasoning + " [LLM arbiter unavailable]"
 
         return {
             "signal": consensus,

@@ -4,6 +4,11 @@ adapters/execution_algo/vwap_adapter.py — Volume-Weighted Average Price execut
 Sizes each child order proportionally to the historical intraday volume profile
 over *VWAP_LOOKBACK_DAYS* trading days, then places them on a per-slice schedule.
 
+NOTE: execute() blocks the calling thread for the full execution window. Never
+call this directly from a Streamlit render function or an async event loop.
+Use a background thread (e.g. concurrent.futures.ThreadPoolExecutor) at the
+call site. Call stop() to interrupt an in-progress execution early.
+
 ENV vars
 --------
     VWAP_LOOKBACK_DAYS   days of history to build volume profile (default: 5)
@@ -14,7 +19,7 @@ from __future__ import annotations
 import logging
 import math
 import os
-import time
+import threading
 from typing import Any
 
 from adapters.execution_algo.result import ExecutionResult
@@ -41,6 +46,11 @@ class VWAPAdapter:
         self._slice_seconds = slice_seconds or int(
             os.environ.get("TWAP_SLICE_SECONDS", "60")
         )
+        self._stop_event = threading.Event()
+
+    def stop(self) -> None:
+        """Signal any in-progress execute() to abort after the current slice."""
+        self._stop_event.set()
 
     def _get_volume_weights(self, symbol: str, n_slices: int) -> list[float]:
         """
@@ -75,6 +85,7 @@ class VWAPAdapter:
         decision_price: float = 0.0,
         **kwargs: Any,
     ) -> ExecutionResult:
+        self._stop_event.clear()
         duration_seconds = duration_minutes * 60
         n_slices = max(1, math.ceil(duration_seconds / self._slice_seconds))
         weights = self._get_volume_weights(symbol, n_slices)
@@ -87,6 +98,9 @@ class VWAPAdapter:
         fills: list[dict] = []
         placed = 0.0
         for i, weight in enumerate(weights):
+            if self._stop_event.is_set():
+                logger.warning("VWAP: execution aborted after %d/%d slices", i, n_slices)
+                break
             is_last = i == n_slices - 1
             if is_last:
                 qty = round(total_qty - placed, 4)
@@ -103,7 +117,8 @@ class VWAPAdapter:
             fills.append(fill)
             placed = round(placed + qty, 4)
             if not is_last:
-                time.sleep(self._slice_seconds)
+                # Interruptible sleep: wakes immediately if stop() is called
+                self._stop_event.wait(timeout=self._slice_seconds)
 
         return ExecutionResult.from_fills(
             fills=fills,

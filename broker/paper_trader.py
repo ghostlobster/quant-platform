@@ -356,7 +356,18 @@ def get_portfolio(current_prices: Optional[dict[str, float]] = None) -> pd.DataF
 
         cur_price = None
         if current_prices is not None:
-            cur_price = current_prices.get(ticker)
+            raw_price = current_prices.get(ticker)
+            if raw_price is not None:
+                try:
+                    p = float(raw_price)
+                    if math.isnan(p) or math.isinf(p) or p <= 0:
+                        raise ValueError(f"non-positive or non-finite price: {p}")
+                    cur_price = p
+                except (TypeError, ValueError) as exc:
+                    logger.warning(
+                        "get_portfolio: invalid price for %s (%s); skipping P&L enrichment",
+                        ticker, exc,
+                    )
 
         if cur_price is not None:
             market_val    = round(shares * cur_price, 2)
