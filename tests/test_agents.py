@@ -56,7 +56,7 @@ def test_regime_agent_unknown_regime_neutral():
 def test_regime_agent_fetches_regime_when_absent():
     from agents.regime_agent import RegimeAgent
     agent = RegimeAgent()
-    with patch("analysis.regime.get_live_regime_with_llm",
+    with patch("analysis.regime.get_cached_live_regime",
                return_value={"regime": "trending_bull"}):
         result = agent.run({})
     assert result.signal == "bullish"
@@ -65,7 +65,7 @@ def test_regime_agent_fetches_regime_when_absent():
 def test_regime_agent_fallback_on_fetch_error():
     from agents.regime_agent import RegimeAgent
     agent = RegimeAgent()
-    with patch("analysis.regime.get_live_regime_with_llm",
+    with patch("analysis.regime.get_cached_live_regime",
                side_effect=RuntimeError("no data")):
         result = agent.run({})
     assert result.signal == "neutral"

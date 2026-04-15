@@ -1,5 +1,6 @@
 import os
 import sys
+import threading
 from unittest.mock import MagicMock
 
 import pytest
@@ -72,7 +73,7 @@ def test_twap_execute_returns_execution_result():
     }
 
     adapter = TWAPAdapter(slice_seconds=30)  # 2 slices for 1-min window
-    with patch("time.sleep"):
+    with patch.object(threading.Event, "wait", return_value=False):
         result = adapter.execute(
             symbol="AAPL",
             total_qty=10.0,
@@ -100,7 +101,7 @@ def test_twap_slices_into_multiple_orders():
     }
 
     adapter = TWAPAdapter(slice_seconds=30)  # 2 slices in 1 min
-    with patch("time.sleep"):
+    with patch.object(threading.Event, "wait", return_value=False):
         adapter.execute(
             symbol="AAPL",
             total_qty=100.0,
@@ -126,7 +127,7 @@ def test_twap_single_slice_no_sleep():
     }
 
     adapter = TWAPAdapter(slice_seconds=120)  # 1 slice for 1-min window
-    with patch("time.sleep") as mock_sleep:
+    with patch.object(threading.Event, "wait", return_value=False) as mock_wait:
         adapter.execute(
             symbol="MSFT",
             total_qty=50.0,
@@ -135,7 +136,7 @@ def test_twap_single_slice_no_sleep():
             duration_minutes=1,
         )
 
-    mock_sleep.assert_not_called()
+    mock_wait.assert_not_called()
 
 
 # ── VWAPAdapter ────────────────────────────────────────────────────────────────
@@ -159,7 +160,7 @@ def test_vwap_execute_returns_execution_result():
 
     adapter = VWAPAdapter(lookback_days=5, slice_seconds=30)
     with patch("data.fetcher.fetch_ohlcv", return_value=mock_df), \
-         patch("time.sleep"):
+         patch.object(threading.Event, "wait", return_value=False):
         result = adapter.execute(
             symbol="AAPL",
             total_qty=10.0,
@@ -192,7 +193,7 @@ def test_vwap_falls_back_to_uniform_weights_on_empty_df():
 
     adapter = VWAPAdapter(lookback_days=5, slice_seconds=30)
     with patch("data.fetcher.fetch_ohlcv", return_value=empty_df), \
-         patch("time.sleep"):
+         patch.object(threading.Event, "wait", return_value=False):
         result = adapter.execute(
             symbol="XYZ",
             total_qty=5.0,
