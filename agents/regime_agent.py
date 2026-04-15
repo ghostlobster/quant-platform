@@ -16,8 +16,8 @@ class RegimeAgent:
         regime = context.get("regime")
         if regime is None:
             try:
-                from analysis.regime import get_live_regime_with_llm
-                data = get_live_regime_with_llm()
+                from analysis.regime import get_cached_live_regime
+                data = get_cached_live_regime(use_llm=True)
                 regime = data["regime"]
             except Exception as exc:
                 logger.warning("RegimeAgent: regime fetch failed: %s", exc)

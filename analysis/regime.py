@@ -15,12 +15,17 @@ from __future__ import annotations
 
 import json
 import os
+import time
 
 import pandas as pd
 
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+# ── Module-level TTL cache for live regime (avoids repeated yfinance + LLM calls) ─
+_REGIME_CACHE_TTL: int = int(os.environ.get("REGIME_CACHE_TTL", "300"))  # 5 min default
+_regime_cache: dict = {"data": None, "expires_at": 0.0}
 
 REGIME_STATES: list[str] = [
     "trending_bull",
@@ -215,10 +220,14 @@ def _parse_llm_regime(llm_response: str) -> tuple[str, float]:
         data = json.loads(text)
         regime = str(data.get("regime", "")).strip()
         if regime not in REGIME_STATES:
-            logger.warning("LLM returned unknown regime %r; falling back", regime)
+            logger.warning(
+                "LLM returned invalid regime %r (must be one of %s); "
+                "forcing fallback to 'high_vol'",
+                regime, REGIME_STATES,
+            )
             return _FALLBACK
-        confidence = float(data.get("confidence", 0.5))
-        confidence = max(0.0, min(1.0, confidence))
+        raw_conf = data.get("confidence", 0.5)
+        confidence = max(0.0, min(1.0, float(raw_conf)))
         return regime, confidence
     except Exception as exc:
         logger.warning("Failed to parse LLM regime response: %s  raw=%r", exc, llm_response[:200])
@@ -316,4 +325,28 @@ def get_live_regime_with_llm(llm_weight: float | None = None) -> dict:
     except Exception as exc:
         logger.warning("LLM regime fusion failed, using quant regime: %s", exc)
 
+    return result
+
+
+def get_cached_live_regime(use_llm: bool = False) -> dict:
+    """
+    Return the current live regime, re-fetching only when the TTL has expired.
+
+    Uses a module-level cache (default TTL: REGIME_CACHE_TTL env var, 300 s).
+    This prevents redundant yfinance + optional LLM calls when multiple agents
+    (or the monitoring sidecar) ask for the regime within the same window.
+
+    Parameters
+    ----------
+    use_llm : if True, calls get_live_regime_with_llm(); otherwise get_live_regime().
+    """
+    now = time.time()
+    if _regime_cache["data"] is not None and now < _regime_cache["expires_at"]:
+        return _regime_cache["data"]  # type: ignore[return-value]
+
+    fetch = get_live_regime_with_llm if use_llm else get_live_regime
+    result = fetch()
+    _regime_cache["data"] = result
+    _regime_cache["expires_at"] = now + _REGIME_CACHE_TTL
+    logger.debug("Regime cache refreshed (ttl=%ds): %s", _REGIME_CACHE_TTL, result.get("regime"))
     return result

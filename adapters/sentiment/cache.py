@@ -10,8 +10,14 @@ from __future__ import annotations
 import time
 
 from data.db import get_connection
+from utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 _DEFAULT_TTL = 1800  # 30 minutes
+
+# Allow up to 60 s of clock-skew between writer and reader before rejecting entry
+_CLOCK_SKEW_TOLERANCE = 60.0
 
 
 def cache_read(symbol: str, provider: str, ttl: int = _DEFAULT_TTL) -> float | None:
@@ -39,8 +45,16 @@ def cache_read(symbol: str, provider: str, ttl: int = _DEFAULT_TTL) -> float | N
 
     if row is None:
         return None
-    age = time.time() - float(row["fetched_at"])
-    if age > ttl:
+    now = time.time()
+    fetched_at = float(row["fetched_at"])
+    # Reject entries with implausible timestamps (zero/negative or far future)
+    if not (0 < fetched_at <= now + _CLOCK_SKEW_TOLERANCE):
+        logger.warning(
+            "Sentiment cache: discarding entry with invalid timestamp %.0f for %s/%s",
+            fetched_at, symbol, provider,
+        )
+        return None
+    if now - fetched_at > ttl:
         return None
     return float(row["score"])
 

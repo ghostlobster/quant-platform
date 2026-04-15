@@ -153,9 +153,15 @@ def render() -> None:
         )
         try:
             from data.db import get_connection
+            _PAGE_SIZE = 50
+            _exec_page = st.session_state.get("exec_analytics_page", 0)
             conn = get_connection()
+            total_exec = conn.execute(
+                "SELECT COUNT(*) FROM execution_analytics"
+            ).fetchone()[0]
             rows = conn.execute(
-                "SELECT * FROM execution_analytics ORDER BY executed_at DESC LIMIT 500"
+                "SELECT * FROM execution_analytics ORDER BY executed_at DESC LIMIT ? OFFSET ?",
+                (_PAGE_SIZE, _exec_page * _PAGE_SIZE),
             ).fetchall()
             conn.close()
             if not rows:
@@ -226,8 +232,22 @@ def render() -> None:
                     exec_df[[
                         "executed_at", "symbol", "side", "algo",
                         "total_qty", "decision_price", "avg_fill_price", "slippage_bps",
-                    ]].head(20),
+                    ]],
                     use_container_width=True,
                 )
+
+                # Pagination controls
+                total_pages = max(1, (total_exec + _PAGE_SIZE - 1) // _PAGE_SIZE)
+                pg_col1, pg_col2, pg_col3 = st.columns([1, 2, 1])
+                with pg_col1:
+                    if st.button("← Prev", disabled=_exec_page == 0, key="exec_prev"):
+                        st.session_state["exec_analytics_page"] = _exec_page - 1
+                        st.rerun()
+                with pg_col2:
+                    st.caption(f"Page {_exec_page + 1} of {total_pages} ({total_exec} fills)")
+                with pg_col3:
+                    if st.button("Next →", disabled=_exec_page >= total_pages - 1, key="exec_next"):
+                        st.session_state["exec_analytics_page"] = _exec_page + 1
+                        st.rerun()
         except Exception as exc:
             st.warning(f"Could not load execution analytics: {exc}")

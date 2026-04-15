@@ -11,6 +11,12 @@ from dataclasses import dataclass
 import pandas as pd
 import plotly.graph_objects as go
 
+from utils.logger import get_logger
+
+logger = get_logger(__name__)
+
+_MIN_PERIODS = 20  # minimum trading-day observations for a reliable correlation matrix
+
 # Alert thresholds (overridable by callers)
 CORR_ALERT_AVG_THRESHOLD: float = 0.7
 POSITION_WEIGHT_THRESHOLD: float = 0.25
@@ -46,6 +52,12 @@ def rolling_correlation(
     if not price_data or len(price_data) < 2:
         return pd.DataFrame()
     df = pd.DataFrame(price_data).pct_change().dropna()
+    if len(df) < _MIN_PERIODS:
+        logger.warning(
+            "rolling_correlation skipped: only %d periods available (min %d).",
+            len(df), _MIN_PERIODS,
+        )
+        return pd.DataFrame()
     if len(df) < window:
         return df.corr()
     return df.rolling(window).corr().iloc[-len(price_data):]
@@ -142,10 +154,21 @@ def check_correlation_alerts(
 
 
 def compute_correlation_matrix(price_data: dict[str, pd.Series]) -> pd.DataFrame:
-    """Compute pairwise correlation of returns from a dict of price series."""
+    """Compute pairwise correlation of returns from a dict of price series.
+
+    Returns an empty DataFrame when fewer than _MIN_PERIODS observations are
+    available, since the matrix would be statistically unreliable.
+    """
     if not price_data or len(price_data) < 2:
         return pd.DataFrame()
     df = pd.DataFrame(price_data).pct_change().dropna()
+    if len(df) < _MIN_PERIODS:
+        logger.warning(
+            "Correlation matrix skipped: only %d periods available (min %d). "
+            "Results would be unreliable.",
+            len(df), _MIN_PERIODS,
+        )
+        return pd.DataFrame()
     return df.corr()
 
 
