@@ -215,71 +215,66 @@ def check_alerts(current_data: dict[str, dict[str, Any]]) -> list[dict]:
     structlog.contextvars.bind_contextvars(run_id=str(uuid.uuid4())[:8], component="scheduler")
 
     conn = get_connection()
+    triggered: list[dict] = []
+    now = time.time()
     try:
         rows = conn.execute(
             "SELECT * FROM alerts WHERE enabled=1"
         ).fetchall()
-    finally:
-        conn.close()
 
-    triggered: list[dict] = []
-    now = time.time()
+        for row in rows:
+            ticker     = row["ticker"]
+            alert_type = row["alert_type"]
+            threshold  = float(row["threshold"])
+            alert_id   = row["id"]
 
-    for row in rows:
-        ticker     = row["ticker"]
-        alert_type = row["alert_type"]
-        threshold  = float(row["threshold"])
-        alert_id   = row["id"]
+            data = current_data.get(ticker)
+            if data is None:
+                continue
 
-        data = current_data.get(ticker)
-        if data is None:
-            continue
+            price = data.get("price")
+            rsi   = data.get("rsi")
 
-        price = data.get("price")
-        rsi   = data.get("rsi")
+            fired = False
+            if alert_type == "price_above" and price is not None and price >= threshold:
+                fired = True
+            elif alert_type == "price_below" and price is not None and price <= threshold:
+                fired = True
+            elif alert_type == "rsi_above" and rsi is not None and rsi >= threshold:
+                fired = True
+            elif alert_type == "rsi_below" and rsi is not None and rsi <= threshold:
+                fired = True
 
-        fired = False
-        if alert_type == "price_above" and price is not None and price >= threshold:
-            fired = True
-        elif alert_type == "price_below" and price is not None and price <= threshold:
-            fired = True
-        elif alert_type == "rsi_above" and rsi is not None and rsi >= threshold:
-            fired = True
-        elif alert_type == "rsi_below" and rsi is not None and rsi <= threshold:
-            fired = True
+            if fired:
+                _label = ALERT_TYPES.get(alert_type, alert_type)
+                msg = (
+                    f"{ticker}: {_label} {threshold:.2f} triggered — "
+                    f"price=${price:.2f}" +
+                    (f", RSI={rsi:.1f}" if rsi is not None else "")
+                )
+                logger.info("ALERT FIRED: %s", msg)
+                _notify(f"Alert: {ticker}", msg)
+                broadcast(subject=f"Alert: {ticker}", body=msg)
 
-        if fired:
-            _label = ALERT_TYPES.get(alert_type, alert_type)
-            msg = (
-                f"{ticker}: {_label} {threshold:.2f} triggered — "
-                f"price=${price:.2f}" +
-                (f", RSI={rsi:.1f}" if rsi is not None else "")
-            )
-            logger.info("ALERT FIRED: %s", msg)
-            _notify(f"Alert: {ticker}", msg)
-            broadcast(subject=f"Alert: {ticker}", body=msg)
-
-            # Stamp triggered_at
-            conn2 = get_connection()
-            try:
-                with conn2:
-                    conn2.execute(
+                # Stamp triggered_at — reuse the same connection
+                with conn:
+                    conn.execute(
                         "UPDATE alerts SET triggered_at=? WHERE id=?",
                         (now, alert_id),
                     )
-            finally:
-                conn2.close()
 
-            triggered.append({
-                "id":         alert_id,
-                "ticker":     ticker,
-                "alert_type": alert_type,
-                "threshold":  threshold,
-                "price":      price,
-                "rsi":        rsi,
-                "message":    msg,
-                "fired_at":   pd.Timestamp(now, unit="s").strftime("%Y-%m-%d %H:%M:%S"),
-            })
+                triggered.append({
+                    "id":         alert_id,
+                    "ticker":     ticker,
+                    "alert_type": alert_type,
+                    "threshold":  threshold,
+                    "price":      price,
+                    "rsi":        rsi,
+                    "message":    msg,
+                    "fired_at":   pd.Timestamp(now, unit="s").strftime("%Y-%m-%d %H:%M:%S"),
+                })
+    finally:
+        conn.close()
 
     return triggered
 

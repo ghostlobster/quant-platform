@@ -14,11 +14,15 @@ from __future__ import annotations
 
 import json
 import os
+import re
 
 from agents.base import AgentProvider, AgentSignal
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+# Valid ticker: 1-6 uppercase letters/digits, optionally with a dot suffix (e.g. BRK.B)
+_TICKER_RE = re.compile(r"^[A-Z0-9]{1,6}(\.[A-Z]{1,2})?$")
 
 _DEFAULT_WEIGHTS: dict[str, float] = {
     "regime_agent": 1.5,
@@ -157,7 +161,9 @@ class MetaAgent:
             f"- {s.agent_name}: {s.signal} ({s.confidence:.2f}) — {s.reasoning}"
             for s in signals
         )
-        ticker = context.get("ticker", "unknown")
+        raw_ticker = str(context.get("ticker", "")).upper().strip()
+        # Validate ticker to prevent prompt injection
+        ticker = raw_ticker if _TICKER_RE.match(raw_ticker) else "UNKNOWN"
         prompt = (
             f"You are a quant portfolio manager. The following specialist agents have "
             f"analysed {ticker} and disagree (weighted score: {weighted_score:+.3f}):\n\n"

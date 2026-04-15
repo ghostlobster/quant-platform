@@ -19,19 +19,25 @@ from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-_BASE_URL = os.environ.get("UNUSUAL_WHALES_BASE_URL", "https://api.unusualwhales.com")
-_TOKEN = os.environ.get("UNUSUAL_WHALES_TOKEN", "")
+_DEFAULT_BASE_URL = "https://api.unusualwhales.com"
 
 
 class UnusualWhalesAdapter:
     """OptionsFlowProvider backed by the Unusual Whales API."""
 
+    def __init__(self) -> None:
+        # Read credentials at instantiation time so the env is fully loaded
+        self._base_url = os.environ.get("UNUSUAL_WHALES_BASE_URL", _DEFAULT_BASE_URL)
+        self._token = os.environ.get("UNUSUAL_WHALES_TOKEN", "")
+        if not self._token:
+            logger.warning("UNUSUAL_WHALES_TOKEN is not set; requests will be unauthenticated")
+
     def _get(self, path: str) -> dict:
-        url = f"{_BASE_URL}{path}"
+        url = f"{self._base_url}{path}"
         req = urllib.request.Request(
             url,
             headers={
-                "Authorization": f"Bearer {_TOKEN}",
+                "Authorization": f"Bearer {self._token}",
                 "Accept": "application/json",
                 "User-Agent": "quant-platform/1.0",
             },

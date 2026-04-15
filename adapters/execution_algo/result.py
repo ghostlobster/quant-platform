@@ -6,8 +6,13 @@ fill details, slippage metrics, and the algorithm used.
 """
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass, field
+
+logger = logging.getLogger(__name__)
+
+_SLIPPAGE_WARN_BPS = 100.0  # warn when slippage exceeds 1%
 
 
 @dataclass
@@ -59,6 +64,12 @@ class ExecutionResult:
             slippage_bps = (avg_fill - decision_price) / decision_price * 1e4
         else:
             slippage_bps = 0.0
+
+        if abs(slippage_bps) > _SLIPPAGE_WARN_BPS:
+            logger.warning(
+                "High slippage detected: %s %s %.4f bps (decision=%.4f avg_fill=%.4f)",
+                side.upper(), symbol, slippage_bps, decision_price, avg_fill,
+            )
 
         return cls(
             symbol=symbol.upper(),
