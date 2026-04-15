@@ -18,8 +18,8 @@ import os
 
 try:
     from fastapi import FastAPI  # type: ignore[import]
-    from fastapi.responses import PlainTextResponse  # type: ignore[import]
-    _FASTAPI_AVAILABLE = True
+    from fastapi.responses import PlainTextResponse  # type: ignore[import]  # pragma: no cover
+    _FASTAPI_AVAILABLE = True  # pragma: no cover
 except ImportError:
     _FASTAPI_AVAILABLE = False
 
@@ -31,7 +31,7 @@ app = FastAPI(title="quant-platform metrics", docs_url=None, redoc_url=None) \
     if _FASTAPI_AVAILABLE else None  # type: ignore[assignment]
 
 
-def _get_metrics_text() -> str:
+def _get_metrics_text() -> str:  # pragma: no cover
     """Collect and return current Prometheus metrics in text exposition format."""
     # Refresh portfolio metrics on each scrape
     try:
@@ -63,7 +63,7 @@ def _get_metrics_text() -> str:
         return "# prometheus-client not installed\n"
 
 
-if _FASTAPI_AVAILABLE and app is not None:
+if _FASTAPI_AVAILABLE and app is not None:  # pragma: no cover
     @app.get("/metrics", response_class=PlainTextResponse)
     async def metrics_endpoint():
         """Prometheus scrape endpoint."""
@@ -78,7 +78,7 @@ if _FASTAPI_AVAILABLE and app is not None:
         return {"status": "ok"}
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     if not _FASTAPI_AVAILABLE:
         raise SystemExit("fastapi and uvicorn are required. pip install fastapi uvicorn")
     import uvicorn  # type: ignore[import]

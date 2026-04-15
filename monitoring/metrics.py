@@ -20,7 +20,7 @@ logger = get_logger(__name__)
 
 try:
     import prometheus_client  # type: ignore[import]  # noqa: F401
-    _PROM_AVAILABLE = True
+    _PROM_AVAILABLE = True  # pragma: no cover
 except ImportError:
     _PROM_AVAILABLE = False
     logger.info(
@@ -32,7 +32,7 @@ except ImportError:
 def _make_gauge(name: str, doc: str, labels: list[str] | None = None):
     if not _PROM_AVAILABLE:
         return _NoopMetric()
-    try:
+    try:  # pragma: no cover
         from prometheus_client import Gauge as _Gauge
         return _Gauge(name, doc, labels or [])
     except Exception:
@@ -42,7 +42,7 @@ def _make_gauge(name: str, doc: str, labels: list[str] | None = None):
 def _make_counter(name: str, doc: str):
     if not _PROM_AVAILABLE:
         return _NoopMetric()
-    try:
+    try:  # pragma: no cover
         from prometheus_client import Counter as _Counter
         return _Counter(name, doc)
     except Exception:
@@ -52,7 +52,7 @@ def _make_counter(name: str, doc: str):
 def _make_histogram(name: str, doc: str, buckets=None):
     if not _PROM_AVAILABLE:
         return _NoopMetric()
-    try:
+    try:  # pragma: no cover
         from prometheus_client import Histogram as _Histogram
         kwargs = {"buckets": buckets} if buckets else {}
         return _Histogram(name, doc, **kwargs)

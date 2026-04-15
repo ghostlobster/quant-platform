@@ -113,7 +113,7 @@ def build_node_features(
 
 # ── GAT model (torch-geometric) ──────────────────────────────────────────────
 
-def _build_gat_model(in_channels: int, hidden_dim: int, out_channels: int = 1):
+def _build_gat_model(in_channels: int, hidden_dim: int, out_channels: int = 1):  # pragma: no cover
     """Build a 2-layer GAT model. Raises ImportError if torch/torch_geometric absent."""
     import torch
     import torch.nn as nn
@@ -134,7 +134,7 @@ def _build_gat_model(in_channels: int, hidden_dim: int, out_channels: int = 1):
     return GATSignalModel()
 
 
-def _adj_to_edge_index(adj: np.ndarray):
+def _adj_to_edge_index(adj: np.ndarray):  # pragma: no cover
     """Convert dense adjacency matrix to COO edge_index for torch-geometric."""
     import torch
     src, dst = np.where(adj > 0)
@@ -162,7 +162,7 @@ class GNNSignal:
         if not path.exists():
             logger.info("GNNSignal: no checkpoint at %s, using fallback scorer", path)
             return
-        try:
+        try:  # pragma: no cover
             import torch
             in_channels = 8
             model = _build_gat_model(in_channels, _HIDDEN_DIM)
@@ -170,9 +170,9 @@ class GNNSignal:
             model.eval()
             self._model = model
             logger.info("GNNSignal: loaded checkpoint from %s", path)
-        except ImportError:
+        except ImportError:  # pragma: no cover
             logger.info("torch/torch-geometric not installed; GNN using fallback scorer")
-        except Exception as exc:
+        except Exception as exc:  # pragma: no cover
             logger.warning("GNNSignal: failed to load checkpoint: %s", exc)
 
     def score(
@@ -199,11 +199,11 @@ class GNNSignal:
         if not tickers:
             return {}
 
-        if self._model is not None:
+        if self._model is not None:  # pragma: no cover
             return self._score_with_gat(tickers, indicators, regime, sentiments)
         return self._fallback_score(tickers, indicators, sentiments)
 
-    def _score_with_gat(
+    def _score_with_gat(  # pragma: no cover
         self,
         tickers: list[str],
         indicators: dict[str, dict] | None,

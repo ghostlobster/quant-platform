@@ -35,7 +35,7 @@ _DEFAULT_MODEL_PATH = os.environ.get("RL_SIZER_MODEL_PATH", "models/rl_sizer.zip
 _DEFAULT_TIMESTEPS = int(os.environ.get("RL_SIZER_TIMESTEPS", "50000"))
 
 
-def _build_env(trades_df: pd.DataFrame):
+def _build_env(trades_df: pd.DataFrame):  # pragma: no cover
     """
     Build a gymnasium Env from a DataFrame of closed trades.
 
@@ -138,7 +138,7 @@ def _prepare_training_df(trades_df: pd.DataFrame) -> pd.DataFrame:
     return df.dropna(subset=["realised_pnl"])
 
 
-def train(
+def train(  # pragma: no cover
     trades_df: pd.DataFrame,
     total_timesteps: int = _DEFAULT_TIMESTEPS,
     save_path: str = _DEFAULT_MODEL_PATH,

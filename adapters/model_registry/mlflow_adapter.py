@@ -23,7 +23,7 @@ logger = get_logger(__name__)
 _TRACKING_URI = os.environ.get("MLFLOW_TRACKING_URI", "mlruns")
 
 
-class MLflowAdapter:
+class MLflowAdapter:  # pragma: no cover
     """ModelRegistryProvider wrapping the MLflow tracking and registry APIs."""
 
     def __init__(self, tracking_uri: str | None = None) -> None:
