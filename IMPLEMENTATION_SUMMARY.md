@@ -213,3 +213,13 @@ Date: 2026-04-15
 | CI (ta installed) | All pass | **76.04%** (meets 76% threshold) |
 
 CI enforces `--cov-fail-under=76`. `tests/test_strategies_indicators.py` uses `pytest.importorskip("ta")` to skip gracefully when `ta` is absent, avoiding collection errors that would abort the entire test run.
+
+## CI Status (PR #48)
+
+| Check | Result |
+|---|---|
+| lint | ✅ success |
+| security | ✅ success |
+| Test (Python 3.11) | ✅ success |
+
+All three CI checks green as of 2026-04-15. Branch: `claude/plan-2026-quant-features-b66UX`.
