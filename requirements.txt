@@ -60,3 +60,5 @@ websockets==16.0
 yfinance==1.2.1
 ccxt>=4.0.0
 structlog>=24.0.0
+lightgbm>=4.0.0
+scipy>=1.11.0

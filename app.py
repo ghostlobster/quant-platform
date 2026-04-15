@@ -15,6 +15,7 @@ from pages import (
     efficient_frontier,
     greeks,
     journal_tab,
+    ml_signals,
     portfolio,
     screener,
     shared,
@@ -37,8 +38,10 @@ st.set_page_config(
 
 shared.render_sidebar()
 
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
-    "📈 Chart", "🔬 Backtest", "🔍 Screener", "💼 Portfolio", "🔔 Alerts", "📓 Journal", "📐 Efficient Frontier", "🧮 Greeks"
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
+    "📈 Chart", "🔬 Backtest", "🔍 Screener", "💼 Portfolio",
+    "🔔 Alerts", "📓 Journal", "📐 Efficient Frontier", "🧮 Greeks",
+    "🤖 ML Signals",
 ])
 with tab1:
     chart.render()
@@ -56,3 +59,5 @@ with tab7:
     efficient_frontier.render()
 with tab8:
     greeks.render()
+with tab9:
+    ml_signals.render()

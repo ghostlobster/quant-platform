@@ -110,6 +110,19 @@ def init_db() -> None:
             )
         """)
 
+        # ----- ML model metadata -----
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS model_metadata (
+                model_name   TEXT    NOT NULL,
+                trained_at   REAL    NOT NULL,   -- Unix timestamp
+                train_ic     REAL,
+                test_ic      REAL,
+                n_tickers    INTEGER,
+                period       TEXT,
+                PRIMARY KEY (model_name, trained_at)
+            )
+        """)
+
         # Seed paper_account if absent
         import os
         starting_cash = float(os.getenv("PAPER_STARTING_CASH", "100000"))
