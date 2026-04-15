@@ -62,9 +62,16 @@ class StocktwitsAdapter:
         return [self.score(t) for t in texts]
 
     def ticker_sentiment(self, symbol: str, lookback_hours: int = 24) -> float:
+        """Return sentiment score for symbol (30-min SQLite cache)."""
+        from adapters.sentiment.cache import cache_read, cache_write
+
+        cached = cache_read(symbol, "stocktwits")
+        if cached is not None:
+            return cached
+
         messages = self._fetch_messages(symbol)
         scored = [self._message_score(m) for m in messages]
         valid = [s for s in scored if s is not None]
-        if not valid:
-            return 0.0
-        return sum(valid) / len(valid)
+        score = sum(valid) / len(valid) if valid else 0.0
+        cache_write(symbol, "stocktwits", score)
+        return score

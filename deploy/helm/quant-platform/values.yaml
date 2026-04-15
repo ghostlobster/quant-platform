@@ -1,0 +1,55 @@
+replicaCount: 1
+
+image:
+  repository: ghcr.io/ghostlobster/quant-platform
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+streamlit:
+  port: 8501
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "512Mi"
+    limits:
+      cpu: "1000m"
+      memory: "2Gi"
+
+metrics:
+  enabled: true
+  port: 9090
+  resources:
+    requests:
+      cpu: "50m"
+      memory: "128Mi"
+    limits:
+      cpu: "200m"
+      memory: "256Mi"
+
+backtestingWorker:
+  enabled: true
+  replicaCount: 1
+  autoscaling:
+    enabled: true
+    minReplicas: 1
+    maxReplicas: 8
+    targetCPUUtilizationPercentage: 70
+
+service:
+  type: NodePort
+  port: 8501
+
+secrets:
+  # All secrets are read from a Kubernetes Secret named quant-platform-secrets
+  # Create it with: kubectl create secret generic quant-platform-secrets --from-env-file=.env
+  secretName: quant-platform-secrets
+
+env:
+  APP_ENV: production
+  LOG_FORMAT: json
+  LOG_LEVEL: INFO
+  MARKET_DATA_PROVIDER: yfinance
+  PAPER_STARTING_CASH: "100000"
+  EXECUTION_ALGO: market
+  TSDB_PROVIDER: sqlite
+  CORRELATION_MONITOR_ENABLED: "1"

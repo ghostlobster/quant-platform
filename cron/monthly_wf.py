@@ -12,6 +12,7 @@ import sys
 from datetime import date
 from pathlib import Path
 
+import pandas as pd
 import yfinance as yf
 
 from backtester.walk_forward import walk_forward
@@ -109,6 +110,26 @@ def run() -> int:
             failed.append(ticker)
 
     conn.close()
+
+    # Optional: retrain RL position sizer
+    if os.getenv("RL_SIZER_RETRAIN", "0") == "1":
+        try:
+            from analysis.rl_trainer import train as train_rl_sizer
+            from journal.trading_journal import get_trades
+            trades = get_trades()
+            if trades is not None and not trades.empty and "realised_pnl" in trades.columns:
+                closes = trades[trades.get("action", pd.Series()).str.upper() == "SELL"] \
+                    if "action" in trades.columns else trades
+                if len(closes) >= 10:
+                    logger.info("Retraining RL position sizer on %d closed trades", len(closes))
+                    saved = train_rl_sizer(closes)
+                    logger.info("RL sizer retrained: %s", saved)
+                else:
+                    logger.info("RL sizer skipped — fewer than 10 closed trades available")
+        except ImportError:
+            logger.info("RL sizer retraining skipped (stable-baselines3/gymnasium not installed)")
+        except Exception as exc:
+            logger.error("RL sizer retraining failed: %s", exc)
 
     # Summary table
     col = "{:<8} {:>14} {:>14} {:>10}"

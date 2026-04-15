@@ -356,3 +356,144 @@ def run_var_check(var_threshold: float = 0.03) -> dict | None:
         }
 
     return None
+
+
+# ── Daily correlation & concentration monitor ─────────────────────────────────
+
+def run_correlation_check(
+    price_data: "dict[str, pd.Series] | None" = None,
+    positions: "dict[str, float] | None" = None,
+    sector_map: "dict[str, str] | None" = None,
+) -> list[dict]:
+    """
+    Run the correlation and concentration monitor and broadcast any alerts.
+
+    Parameters
+    ----------
+    price_data  : {ticker: price Series} — fetched from data/fetcher if None
+    positions   : {ticker: market_value} — read from paper_trader if None
+    sector_map  : optional {ticker: sector} for sector concentration checks
+
+    Returns
+    -------
+    List of alert dicts that were fired.
+    """
+    import os
+    if os.environ.get("CORRELATION_MONITOR_ENABLED", "0") != "1":
+        return []
+
+    from risk.correlation import check_correlation_alerts
+
+    # Fetch live portfolio if not provided
+    if positions is None:
+        try:
+            from broker.paper_trader import get_portfolio
+            port_df = get_portfolio()
+            if not port_df.empty and "Market Value" in port_df.columns:
+                positions = {
+                    str(row["Ticker"]): float(row["Market Value"])
+                    for _, row in port_df.iterrows()
+                    if row.get("Market Value") is not None
+                }
+            else:
+                positions = {}
+        except Exception as exc:
+            logger.warning("correlation_check: portfolio fetch failed: %s", exc)
+            positions = {}
+
+    # Fetch price history if not provided
+    if price_data is None and positions:
+        try:
+            from data.fetcher import fetch_ohlcv
+            price_data = {}
+            for ticker in positions:
+                df = fetch_ohlcv(ticker, period="3mo")
+                if not df.empty and "Close" in df.columns:
+                    price_data[ticker] = df["Close"]
+        except Exception as exc:
+            logger.warning("correlation_check: price fetch failed: %s", exc)
+            price_data = {}
+
+    if not positions:
+        logger.info("correlation_check: no positions to check")
+        return []
+
+    alerts = check_correlation_alerts(
+        price_data=price_data or {},
+        positions=positions,
+        sector_map=sector_map,
+    )
+
+    fired: list[dict] = []
+    for alert in alerts:
+        msg = alert.message
+        logger.warning("CORRELATION ALERT [%s]: %s", alert.alert_type, msg)
+        broadcast(subject=f"Portfolio Alert: {alert.alert_type}", body=msg)
+        fired.append({
+            "alert_type": alert.alert_type,
+            "value": alert.value,
+            "threshold": alert.threshold,
+            "message": msg,
+        })
+
+    if not fired:
+        logger.info("correlation_check: all thresholds clear")
+
+    return fired
+
+
+# ── Anomaly detection scheduler hook ─────────────────────────────────────────
+
+def run_anomaly_checks(
+    watchlist: "list[str] | None" = None,
+    current_prices: "dict[str, float] | None" = None,
+) -> list[dict]:
+    """
+    Run all anomaly detection checks and broadcast results.
+
+    Parameters
+    ----------
+    watchlist       : tickers to check — reads from DB watchlist if None
+    current_prices  : current prices dict — fetched from market data if None
+
+    Returns
+    -------
+    List of anomaly dicts that were detected.
+    """
+    from analysis.anomaly_detector import AnomalyDetector
+
+    # Load watchlist
+    if watchlist is None:
+        try:
+            from data.watchlist import get_watchlist
+            watchlist = get_watchlist()
+        except Exception:
+            watchlist = []
+
+    # Load current prices
+    if current_prices is None and watchlist:
+        try:
+            from data.fetcher import fetch_ohlcv
+            current_prices = {}
+            for ticker in watchlist:
+                df = fetch_ohlcv(ticker, period="5d")
+                if not df.empty and "Close" in df.columns:
+                    current_prices[ticker] = float(df["Close"].iloc[-1])
+        except Exception as exc:
+            logger.warning("anomaly_checks: price fetch failed: %s", exc)
+            current_prices = {}
+
+    detector = AnomalyDetector()
+    results = detector.run_all_checks(
+        watchlist=watchlist or [],
+        current_prices=current_prices or {},
+    )
+
+    fired: list[dict] = []
+    for anomaly in results:
+        msg = anomaly.get("message", str(anomaly))
+        logger.warning("ANOMALY DETECTED [%s]: %s", anomaly.get("type", "?"), msg)
+        broadcast(subject=f"Anomaly: {anomaly.get('type', 'unknown')}", body=msg)
+        fired.append(anomaly)
+
+    return fired

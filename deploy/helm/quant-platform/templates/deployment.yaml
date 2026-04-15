@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-streamlit
+  labels:
+    app: {{ .Release.Name }}-streamlit
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}-streamlit
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}-streamlit
+    spec:
+      containers:
+        - name: streamlit
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["streamlit", "run", "app.py", "--server.port", "{{ .Values.streamlit.port }}", "--server.address", "0.0.0.0"]
+          ports:
+            - containerPort: {{ .Values.streamlit.port }}
+          envFrom:
+            - secretRef:
+                name: {{ .Values.secrets.secretName }}
+          env:
+            {{- range $key, $val := .Values.env }}
+            - name: {{ $key }}
+              value: {{ $val | quote }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.streamlit.resources | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /_stcore/health
+              port: {{ .Values.streamlit.port }}
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /_stcore/health
+              port: {{ .Values.streamlit.port }}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+
+        {{- if .Values.metrics.enabled }}
+        - name: metrics
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["uvicorn", "monitoring.sidecar:app", "--host", "0.0.0.0", "--port", "{{ .Values.metrics.port }}"]
+          ports:
+            - containerPort: {{ .Values.metrics.port }}
+          envFrom:
+            - secretRef:
+                name: {{ .Values.secrets.secretName }}
+          env:
+            {{- range $key, $val := .Values.env }}
+            - name: {{ $key }}
+              value: {{ $val | quote }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.metrics.resources | nindent 12 }}
+        {{- end }}

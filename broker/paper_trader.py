@@ -21,7 +21,10 @@ from __future__ import annotations
 import os
 import sqlite3
 import time
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from adapters.execution_algo.result import ExecutionResult
 
 import pandas as pd
 from dotenv import load_dotenv
@@ -459,3 +462,83 @@ def reset_account() -> None:
         )
     conn.close()
     logger.warning("Paper account reset to $%.2f starting cash.", STARTING_CASH)
+
+
+def execute_algo(
+    ticker: str,
+    qty: float,
+    side: str,
+    algo: Optional[str] = None,
+    decision_price: float = 0.0,
+) -> "ExecutionResult":
+    """
+    Execute an order through the configured execution algorithm.
+
+    This is the single integration point between execution algos and the paper
+    trader.  It calls `get_execution_algo()` to select the algorithm, executes
+    via PaperBrokerAdapter, and logs the result to `execution_analytics`.
+
+    Parameters
+    ----------
+    ticker         : ticker symbol
+    qty            : number of shares (must be > 0)
+    side           : 'buy' or 'sell'
+    algo           : override EXECUTION_ALGO env var; None uses env default
+    decision_price : price at time of trading decision (for slippage calculation)
+
+    Returns
+    -------
+    ExecutionResult with fill details and slippage metrics.
+    """
+    from adapters.broker.paper_adapter import PaperBrokerAdapter
+    from providers.execution_algo import get_execution_algo
+
+    execution_algo_inst = get_execution_algo(algo)
+    broker = PaperBrokerAdapter()
+
+    # If a decision price is provided, patch place_order to use it so fills
+    # happen at the same price (avoids an extra live-price lookup in paper mode).
+    if decision_price > 0:
+        _orig_place_order = broker.place_order
+
+        def _place_at_decision(symbol, qty, side, order_type="market", limit_price=None):
+            return _orig_place_order(symbol, qty, side, order_type, limit_price=decision_price)
+
+        broker.place_order = _place_at_decision  # type: ignore[method-assign]
+
+    result: ExecutionResult = execution_algo_inst.execute(
+        symbol=ticker,
+        total_qty=qty,
+        side=side,
+        broker=broker,
+        decision_price=decision_price,
+        duration_minutes=1,  # paper trades execute immediately
+    )
+
+    # Log to execution_analytics table
+    try:
+        conn = get_connection()
+        with conn:
+            conn.execute(
+                """
+                INSERT INTO execution_analytics
+                    (executed_at, symbol, side, algo, total_qty,
+                     decision_price, avg_fill_price, slippage_bps, broker)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'paper')
+                """,
+                (
+                    result.executed_at,
+                    result.symbol,
+                    result.side,
+                    result.algo,
+                    result.total_qty,
+                    result.decision_price,
+                    result.avg_fill_price,
+                    result.slippage_bps,
+                ),
+            )
+        conn.close()
+    except Exception as _log_exc:
+        logger.warning("Failed to log execution analytics: %s", _log_exc)
+
+    return result

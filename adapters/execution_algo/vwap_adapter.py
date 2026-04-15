@@ -17,6 +17,8 @@ import os
 import time
 from typing import Any
 
+from adapters.execution_algo.result import ExecutionResult
+
 logger = logging.getLogger(__name__)
 
 
@@ -70,8 +72,9 @@ class VWAPAdapter:
         broker: Any,
         *,
         duration_minutes: int = 30,
+        decision_price: float = 0.0,
         **kwargs: Any,
-    ) -> list[dict]:
+    ) -> ExecutionResult:
         duration_seconds = duration_minutes * 60
         n_slices = max(1, math.ceil(duration_seconds / self._slice_seconds))
         weights = self._get_volume_weights(symbol, n_slices)
@@ -91,15 +94,21 @@ class VWAPAdapter:
                 qty = round(total_qty * weight, 4)
             if qty <= 0:
                 continue
-            result = broker.place_order(
+            fill = broker.place_order(
                 symbol=symbol,
                 qty=qty,
                 side=side,
                 order_type="market",
             )
-            fills.append(result)
+            fills.append(fill)
             placed = round(placed + qty, 4)
             if not is_last:
                 time.sleep(self._slice_seconds)
 
-        return fills
+        return ExecutionResult.from_fills(
+            fills=fills,
+            symbol=symbol,
+            side=side,
+            algo="vwap",
+            decision_price=decision_price,
+        )

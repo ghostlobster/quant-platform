@@ -8,6 +8,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
+pytest.importorskip("ta")  # skip entire file if ta is not installed
+
 from strategies.indicators import (
     _latest,
     add_all,

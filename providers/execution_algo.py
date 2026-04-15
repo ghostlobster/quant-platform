@@ -12,6 +12,10 @@ from __future__ import annotations
 import os
 from typing import Any, Optional, Protocol, runtime_checkable
 
+from adapters.execution_algo.result import ExecutionResult
+
+__all__ = ["ExecutionAlgoProvider", "ExecutionResult", "get_execution_algo"]
+
 
 @runtime_checkable
 class ExecutionAlgoProvider(Protocol):
@@ -25,8 +29,9 @@ class ExecutionAlgoProvider(Protocol):
         broker: Any,
         *,
         duration_minutes: int = 30,
+        decision_price: float = 0.0,
         **kwargs: Any,
-    ) -> list[dict]:
+    ) -> ExecutionResult:
         """
         Execute *total_qty* shares of *symbol* via *broker* over *duration_minutes*.
 
