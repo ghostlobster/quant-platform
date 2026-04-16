@@ -2,7 +2,7 @@
 import os
 import sys
 import tempfile
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pandas as pd
@@ -84,6 +84,164 @@ def test_feature_importance_no_model_returns_empty_df():
     assert isinstance(fi, pd.DataFrame)
     assert fi.empty
     assert list(fi.columns) == ["feature", "importance"]
+
+
+# ── MLSignal — predict with injected mock model (no LightGBM needed) ─────────
+
+def _make_mock_model(n_features: int | None = None):
+    """Create a mock model that behaves like a fitted LGBMRegressor."""
+    if n_features is None:
+        n_features = len(_FEATURE_COLS)
+    mock = MagicMock()
+    mock.predict.return_value = np.linspace(-0.05, 0.05, 4)
+    mock.feature_importances_ = np.arange(n_features, 0, -1, dtype=float)
+    return mock
+
+
+def test_predict_with_mock_model_returns_scores():
+    """predict() with an injected model should return float scores in [-1, 1]."""
+    fm = _make_feature_matrix(n_dates=20, n_tickers=4)
+    mock_model = _make_mock_model()
+
+    with patch("strategies.ml_signal.build_feature_matrix", return_value=fm):
+        model = MLSignal(model_path="/tmp/nonexistent_mock.pkl")
+        model._model = mock_model
+        tickers = list(fm.index.get_level_values("ticker").unique())
+        scores = model.predict(tickers, period="6mo")
+
+    assert len(scores) > 0
+    for score in scores.values():
+        assert -1.0 <= score <= 1.0
+
+
+def test_predict_with_mock_model_all_equal_predictions():
+    """When all raw predictions are equal, z-score is 0 and scores are all 0."""
+    fm = _make_feature_matrix(n_dates=20, n_tickers=4)
+    mock_model = _make_mock_model()
+    mock_model.predict.return_value = np.ones(4) * 0.03  # all same → std = 0
+
+    with patch("strategies.ml_signal.build_feature_matrix", return_value=fm):
+        model = MLSignal(model_path="/tmp/nonexistent_mock2.pkl")
+        model._model = mock_model
+        tickers = list(fm.index.get_level_values("ticker").unique())
+        scores = model.predict(tickers, period="6mo")
+
+    for score in scores.values():
+        assert score == pytest.approx(0.0)
+
+
+def test_predict_with_mock_model_exception_falls_back():
+    """When model.predict raises, should fall back to momentum."""
+    fm = _make_feature_matrix(n_dates=20, n_tickers=2)
+    mock_model = _make_mock_model()
+    mock_model.predict.side_effect = RuntimeError("model crashed")
+
+    with patch("strategies.ml_signal.build_feature_matrix", return_value=fm), \
+         patch("data.fetcher.fetch_ohlcv", side_effect=_mock_fetch):
+        model = MLSignal(model_path="/tmp/nonexistent_mock3.pkl")
+        model._model = mock_model
+        tickers = list(fm.index.get_level_values("ticker").unique())
+        scores = model.predict(tickers, period="6mo")
+
+    # Falls back to momentum — scores still valid
+    assert set(scores.keys()) == set(tickers)
+    for score in scores.values():
+        assert -1.0 <= score <= 1.0
+
+
+def test_predict_with_mock_model_empty_fm_falls_back():
+    """When feature matrix is empty with a model loaded, falls back to momentum."""
+    with patch("strategies.ml_signal.build_feature_matrix", return_value=pd.DataFrame()), \
+         patch("data.fetcher.fetch_ohlcv", side_effect=_mock_fetch):
+        model = MLSignal(model_path="/tmp/nonexistent_mock4.pkl")
+        model._model = _make_mock_model()
+        scores = model.predict(["AAPL", "MSFT"], period="6mo")
+
+    assert set(scores.keys()) == {"AAPL", "MSFT"}
+
+
+def test_predict_with_mock_model_no_feature_cols_falls_back():
+    """When latest feature slice is empty (no matching feature cols), falls back."""
+    # Build FM without any of the _FEATURE_COLS columns
+    fm = _make_feature_matrix(n_dates=10, n_tickers=2)
+    # Remove all feature columns so feature_cols = [] → latest is empty
+    only_target = fm[[_TARGET_COL]]
+
+    with patch("strategies.ml_signal.build_feature_matrix", return_value=only_target), \
+         patch("data.fetcher.fetch_ohlcv", side_effect=_mock_fetch):
+        model = MLSignal(model_path="/tmp/nonexistent_mock5.pkl")
+        model._model = _make_mock_model()
+        tickers = list(only_target.index.get_level_values("ticker").unique())
+        scores = model.predict(tickers, period="6mo")
+
+    assert set(scores.keys()) == set(tickers)
+    for score in scores.values():
+        assert -1.0 <= score <= 1.0
+
+
+def test_write_metadata_success():
+    """_write_metadata should call conn.close() on the happy path."""
+    model = MLSignal(model_path="/tmp/nonexistent_meta.pkl")
+    with patch("data.db.get_connection") as mock_conn:
+        conn_obj = MagicMock()
+        conn_obj.__enter__ = MagicMock(return_value=conn_obj)
+        conn_obj.__exit__ = MagicMock(return_value=False)
+        mock_conn.return_value = conn_obj
+        model._write_metadata(5, "2y", 0.05, 0.03)
+    conn_obj.close.assert_called_once()
+
+
+def test_write_metadata_handles_missing_table():
+    """_write_metadata should not raise even when the DB table doesn't exist."""
+    model = MLSignal(model_path="/tmp/nonexistent_meta.pkl")
+    with patch("data.db.get_connection") as mock_conn:
+        conn_obj = MagicMock()
+        conn_obj.__enter__ = MagicMock(return_value=conn_obj)
+        conn_obj.__exit__ = MagicMock(return_value=False)
+        conn_obj.execute.side_effect = Exception("no such table: model_metadata")
+        mock_conn.return_value = conn_obj
+        # Should not raise
+        model._write_metadata(5, "2y", 0.05, 0.03)
+
+
+def test_momentum_fallback_with_none_fetch():
+    """Momentum fallback returns 0.0 when fetch_ohlcv returns None."""
+    with patch("data.fetcher.fetch_ohlcv", return_value=None):
+        model = MLSignal(model_path="/tmp/nonexistent_fallback.pkl")
+        scores = model._momentum_fallback(["AAPL", "MSFT"], "6mo")
+    assert set(scores.keys()) == {"AAPL", "MSFT"}
+    for score in scores.values():
+        assert score == 0.0
+
+
+def test_momentum_fallback_with_fetch_exception():
+    """Momentum fallback returns 0.0 when fetch_ohlcv raises."""
+    with patch("data.fetcher.fetch_ohlcv", side_effect=RuntimeError("network error")):
+        model = MLSignal(model_path="/tmp/nonexistent_fallback2.pkl")
+        scores = model._momentum_fallback(["AAPL"], "6mo")
+    assert scores["AAPL"] == 0.0
+
+
+def test_feature_importance_with_mock_model_exception():
+    """feature_importance() returns empty DataFrame when model raises AttributeError."""
+    model = MLSignal(model_path="/tmp/nonexistent_fi2.pkl")
+    # spec=[] causes AttributeError on any attribute access, triggering the except handler
+    mock_model = MagicMock(spec=[])
+    model._model = mock_model
+    fi = model.feature_importance()
+    assert isinstance(fi, pd.DataFrame)
+    assert fi.empty
+
+
+def test_feature_importance_with_mock_model():
+    """feature_importance() returns sorted DataFrame when model is injected."""
+    model = MLSignal(model_path="/tmp/nonexistent_fi.pkl")
+    model._model = _make_mock_model()
+    fi = model.feature_importance()
+    assert not fi.empty
+    assert set(fi.columns) == {"feature", "importance"}
+    assert list(fi["importance"]) == sorted(fi["importance"], reverse=True)
+    assert (fi["importance"] >= 0).all()
 
 
 # ── MLSignal — with LightGBM (skipped if not installed) ───────────────────────

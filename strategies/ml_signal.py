@@ -160,10 +160,7 @@ class MLSignal:
 
         params = {**_DEFAULT_LGBM_PARAMS, **(lgbm_params or {})}
         model = lgb.LGBMRegressor(**params)
-        model.fit(
-            X_train, y_train,
-            callbacks=[lgb.log_evaluation(period=-1)],
-        )
+        model.fit(X_train, y_train)
         self._model = model
 
         # Evaluate IC on train and test sets
