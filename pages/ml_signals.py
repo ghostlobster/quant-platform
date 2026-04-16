@@ -297,10 +297,10 @@ def render() -> None:
     st.divider()
 
     # ── Execute ML Signals ────────────────────────────────────────────────────
-    st.markdown("#### Execute ML Signals (Paper Trading)")
+    st.markdown("#### Execute ML Signals")
     st.caption(
-        "Translates current alpha scores into paper trading orders: "
-        "long top-scoring tickers, exit bearish positions."
+        "Translates current alpha scores into broker orders via the configured "
+        "`BROKER_PROVIDER` (paper by default). Position sizes use Kelly × regime × |score|."
     )
     exec_threshold = st.slider(
         "Score threshold", min_value=0.1, max_value=0.9, value=0.3, step=0.05,

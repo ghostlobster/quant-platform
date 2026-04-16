@@ -1,7 +1,7 @@
 # Quant Trading Platform — Personal Use
 **Budget:** Free / Open-Source only  
 **Target:** macOS local environment  
-**Last updated:** 2026-04-08
+**Last updated:** 2026-04-16
 
 ---
 
@@ -130,6 +130,41 @@
 | VPS hosting (optional) | ~$5/mo | Only if you want 24/7 scheduling; ask me first |
 
 **Current estimated cost: $0**
+
+---
+
+## 4.5 Recent Architecture Additions (April 2026)
+
+Features added since the initial plan, grouped by theme. See
+`IMPLEMENTATION_SUMMARY.md` for file paths and test coverage.
+
+### Provider / DI layer
+- `providers/` defines Protocols for `market_data`, `broker`, `alert`, `llm`,
+  `tsdb`, `sentiment`, `options_flow`, `execution_algo`, `feature_store`,
+  `model_registry`. Concrete implementations live under `adapters/` and are
+  selected via env vars (`BROKER_PROVIDER`, `MARKET_DATA_PROVIDER`, etc.).
+
+### Risk engine
+- `risk/var.py`, `risk/kelly.py`, `risk/markowitz.py`, `risk/correlation.py`
+  — VaR/CVaR, capped half-Kelly sizing, efficient-frontier optimisation.
+
+### ML alpha pipeline (Jansen + López de Prado)
+- Supervised alpha via `strategies/ml_signal.py` (LightGBM) and
+  `strategies/linear_signal.py` (Ridge); blended through
+  `strategies/ensemble_signal.py`.
+- Feature engineering in `data/features.py`; IC/ICIR evaluation in
+  `analysis/factor_ic.py`.
+- Regime-conditioned models via `analysis/regime.py` + `MLSignal.train_regime_models`.
+- **Triple-barrier labeling** (`analysis/triple_barrier.py`) and
+  **meta-labeling** (`strategies/meta_label.py`) — López de Prado Ch 3.
+- **Fractional differentiation** (`data/frac_diff.py`) — López de Prado Ch 5.
+- **Bayesian HPO** (`strategies/ml_tuning.py`) — Optuna TPE with purged CV.
+
+### Execution & cron
+- `strategies/ml_execution.py` routes orders through the broker provider and
+  sizes positions via Kelly × regime × |score|.
+- `cron/monthly_ml_retrain.py` + `cron/daily_ml_execute.py` schedule retrain
+  and daily execution; see `cron/README.md`.
 
 ---
 
