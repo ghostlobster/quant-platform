@@ -100,3 +100,45 @@ The checkpoint is also recorded in `quant.db` → `model_metadata` table.
 | WF_TICKERS            | SPY,QQQ,AAPL,MSFT,TSLA    | Comma-separated tickers to train on|
 | ML_TRAIN_PERIOD       | 2y                         | yfinance period for training data  |
 | LGBM_ALPHA_MODEL_PATH | models/lgbm_alpha.pkl      | Path to save the model checkpoint  |
+
+---
+
+# Daily ML Signal Execution Cron
+
+Scores the configured ticker universe with the trained LightGBM alpha model and
+routes the resulting orders through the broker provider (paper by default).
+Intended to run after the US market close on weekdays.
+
+## Manual run
+
+```bash
+python -m cron.daily_ml_execute
+```
+
+Override threshold or cap positions:
+
+```bash
+ML_SCORE_THRESHOLD=0.4 ML_MAX_POSITIONS=3 python -m cron.daily_ml_execute
+```
+
+## Crontab entry
+
+Run at 16:05 ET (post-close) on weekdays:
+
+```cron
+5 16 * * 1-5 cd /home/<user>/projects/quant-platform && /home/<user>/projects/quant-platform/.venv/bin/python -m cron.daily_ml_execute >> /var/log/quant-platform/daily_ml_execute.log 2>&1
+```
+
+## Environment variables
+
+| Variable              | Default                    | Description                                           |
+|-----------------------|----------------------------|-------------------------------------------------------|
+| WF_TICKERS            | SPY,QQQ,AAPL,MSFT,TSLA    | Comma-separated tickers to score                       |
+| ML_SCORE_THRESHOLD    | 0.3                        | Minimum |score| required to act                         |
+| ML_MAX_POSITIONS      | 5                          | Maximum simultaneous long positions                    |
+| BROKER_PROVIDER       | paper                      | paper / alpaca / ibkr / schwab (routed via providers/) |
+| LGBM_ALPHA_MODEL_PATH | models/lgbm_alpha.pkl      | Path to the trained model checkpoint                   |
+
+Position sizes are computed as `equity × Kelly × regime_mult × |score|`, where
+Kelly uses the priors `ML_KELLY_WIN_RATE` (0.55), `ML_KELLY_AVG_WIN` (0.03),
+`ML_KELLY_AVG_LOSS` (0.02). Regime multiplier halves size in `high_vol`.

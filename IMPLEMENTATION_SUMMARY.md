@@ -74,3 +74,43 @@ Date: 2026-04-11
 - Added tests for pages/, data/fetcher.py, new modules
 - Final test run: **392 passed, 37 failed** (37 failures are pre-existing watchlist/SQLite env issues)
 - See final coverage report in test run output
+
+---
+
+## Phase 5 (April 2026): ML Alpha Pipeline + López de Prado Integration
+
+### ML Pipeline (PRs #60 / #61)
+- `data/features.py` — cross-sectional MultiIndex feature matrix with lag
+  returns, rolling stats, volume features, forward-return labels (z-scored
+  per date)
+- `analysis/factor_ic.py` — Information Coefficient / ICIR evaluation
+- `strategies/ml_signal.py` — LightGBM regressor; baseline + regime-conditioned
+  models via `train_regime_models()`; momentum fallback when lightgbm absent
+- `strategies/linear_signal.py` — Ridge linear alternative with interpretable
+  feature coefficients
+- `strategies/ensemble_signal.py` — `blend_signals()` weighted average of
+  heterogeneous score sources
+- `backtester/walk_forward.py` — `purged_walk_forward()` with embargo gap
+- `backtester/engine.py` — `run_signal_backtest()` bridge accepts any
+  externally-computed signal Series
+- `cron/monthly_ml_retrain.py` — scheduled retrain
+- `pages/ml_signals.py` — Streamlit tab with train/score/backtest/execute controls
+
+### This session (April 16, 2026)
+- **Kelly position sizing** wired into `strategies/ml_execution.py`
+  (`equity × Kelly × regime_mult × |score|`; tunable via `ML_KELLY_*` env vars)
+- **Broker provider routing** — `execute_ml_signals()` now calls
+  `providers.broker.get_broker()` instead of touching `broker.paper_trader`
+  directly; works with `BROKER_PROVIDER=paper|alpaca|ibkr|schwab`
+- **Daily execution cron** — `cron/daily_ml_execute.py`; scheduled 16:05 ET
+  weekdays; loads trained model, scores universe, dispatches orders through
+  the broker provider
+- **Triple-barrier labeling** — `analysis/triple_barrier.py` (López de Prado
+  Ch 3) with volatility-scaled PT/SL barriers and vertical time barriers
+- **Meta-labeling** — `strategies/meta_label.py` wraps any primary signal with
+  a RandomForest that predicts `P(primary correct)`; final score = primary ×
+  confidence
+- **Fractional differentiation** — `data/frac_diff.py` (López de Prado Ch 5)
+  fixed-width-window FFD plus ADF sweep for minimum stationary `d`
+- **Bayesian hyperparameter tuning** — `strategies/ml_tuning.py`
+  (`tune_lgbm_hyperparams()` via Optuna TPE with purged CV; optional dep)

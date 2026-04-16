@@ -1,162 +1,212 @@
 """
 tests/test_ml_execution.py — Unit tests for strategies/ml_execution.py.
 
-All paper_trader calls and fetch_ohlcv calls are mocked — no DB or network access.
+Uses an in-memory FakeBroker implementing the BrokerProvider Protocol to
+avoid touching SQLite, network, or the real paper_trader. The regime lookup
+is patched to avoid yfinance.
 """
 import os
 import sys
 from unittest.mock import patch
 
 import pandas as pd
+import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from strategies.ml_execution import execute_ml_signals
 
 
-def _make_portfolio(tickers: list[str]) -> pd.DataFrame:
-    if not tickers:
-        return pd.DataFrame(columns=["Ticker", "Shares"])
-    return pd.DataFrame({"Ticker": tickers, "Shares": [10.0] * len(tickers)})
+class FakeBroker:
+    """Minimal in-memory broker mock conforming to BrokerProvider."""
+
+    def __init__(self, positions=None, equity=100_000.0, raise_on="none"):
+        self._positions = positions or []
+        self._equity = equity
+        self._raise_on = raise_on
+        self.orders: list[dict] = []
+
+    def get_account_info(self) -> dict:
+        if self._raise_on == "account":
+            raise RuntimeError("account fetch failed")
+        return {"equity": self._equity, "cash": self._equity}
+
+    def get_positions(self) -> list[dict]:
+        if self._raise_on == "positions":
+            raise RuntimeError("positions fetch failed")
+        return list(self._positions)
+
+    def place_order(self, symbol, qty, side, order_type="market", limit_price=None):
+        if self._raise_on == f"order:{symbol}":
+            raise RuntimeError("simulated order failure")
+        self.orders.append({
+            "symbol": symbol, "qty": qty, "side": side, "type": order_type,
+        })
+        return {"order_id": f"test-{len(self.orders)}", "status": "filled",
+                "symbol": symbol, "qty": qty, "side": side}
+
+    def cancel_order(self, order_id: str) -> bool:  # pragma: no cover - unused
+        return True
+
+    def get_orders(self, status: str = "open") -> list[dict]:  # pragma: no cover
+        return []
 
 
-def _scores(mapping: dict[str, float]) -> dict[str, float]:
-    return mapping
+def _held(ticker: str, qty: float = 10.0) -> dict:
+    return {"symbol": ticker, "qty": qty, "avg_entry_price": 100.0,
+            "market_value": qty * 100.0, "unrealized_pl": 0.0}
 
 
-@patch("strategies.ml_execution.fetch_ohlcv")
-@patch("strategies.ml_execution.get_portfolio")
-@patch("strategies.ml_execution.buy")
-@patch("strategies.ml_execution.sell")
-def test_buys_top_long_candidates(mock_sell, mock_buy, mock_get_portfolio, mock_fetch):
+@pytest.fixture(autouse=True)
+def _patch_regime_and_prices():
+    """Keep regime lookup deterministic and avoid yfinance in every test."""
+    with patch("strategies.ml_execution._current_regime", return_value="trending_bull"), \
+         patch("strategies.ml_execution.fetch_ohlcv",
+               return_value=pd.DataFrame({"Close": [150.0]})):
+        yield
+
+
+def _buys_for(broker: FakeBroker) -> list[str]:
+    return [o["symbol"] for o in broker.orders if o["side"] == "buy"]
+
+
+def _sells_for(broker: FakeBroker) -> list[str]:
+    return [o["symbol"] for o in broker.orders if o["side"] == "sell"]
+
+
+def test_buys_top_long_candidates():
     """High positive scores trigger BUY orders for tickers not already held."""
-    mock_get_portfolio.return_value = _make_portfolio([])
-    mock_fetch.return_value = pd.DataFrame({"Close": [150.0]})
-
+    broker = FakeBroker(positions=[], equity=100_000.0)
     scores = {"AAPL": 0.8, "MSFT": 0.6, "GOOG": -0.5}
-    actions = execute_ml_signals(scores, threshold=0.3, max_positions=5)
 
-    assert "BUY AAPL" in actions
-    assert "BUY MSFT" in actions
-    assert "BUY GOOG" not in actions
-    mock_buy.assert_any_call("AAPL", 1, 150.0)
-    mock_buy.assert_any_call("MSFT", 1, 150.0)
-    mock_sell.assert_not_called()
+    actions = execute_ml_signals(scores, threshold=0.3, max_positions=5, broker=broker)
+
+    assert "AAPL" in _buys_for(broker)
+    assert "MSFT" in _buys_for(broker)
+    assert "GOOG" not in _buys_for(broker)
+    assert any(a.startswith("BUY AAPL x") for a in actions)
+    assert _sells_for(broker) == []
 
 
-@patch("strategies.ml_execution.fetch_ohlcv")
-@patch("strategies.ml_execution.get_portfolio")
-@patch("strategies.ml_execution.buy")
-@patch("strategies.ml_execution.sell")
-def test_sells_bearish_existing_position(mock_sell, mock_buy, mock_get_portfolio, mock_fetch):
+def test_sells_bearish_existing_position():
     """Bearish score (< -threshold) for a held position triggers SELL."""
-    mock_get_portfolio.side_effect = [
-        _make_portfolio(["AAPL"]),   # first call: existing positions
-        _make_portfolio(["AAPL"]),   # second call: fetching shares for sell
-    ]
-    mock_fetch.return_value = pd.DataFrame({"Close": [200.0]})
-
+    broker = FakeBroker(positions=[_held("AAPL", qty=10.0)], equity=100_000.0)
     scores = {"AAPL": -0.7, "MSFT": 0.9}
-    actions = execute_ml_signals(scores, threshold=0.3, max_positions=5)
 
-    assert "SELL AAPL" in actions
-    mock_sell.assert_called_once_with("AAPL", 10.0, 200.0)
+    actions = execute_ml_signals(scores, threshold=0.3, max_positions=5, broker=broker)
+
+    assert "AAPL" in _sells_for(broker)
+    assert any(a.startswith("SELL AAPL") for a in actions)
+    sell_order = next(o for o in broker.orders if o["side"] == "sell")
+    assert sell_order["qty"] == 10.0
 
 
-@patch("strategies.ml_execution.fetch_ohlcv")
-@patch("strategies.ml_execution.get_portfolio")
-@patch("strategies.ml_execution.buy")
-@patch("strategies.ml_execution.sell")
-def test_no_action_within_neutral_band(mock_sell, mock_buy, mock_get_portfolio, mock_fetch):
+def test_no_action_within_neutral_band():
     """Scores within [-threshold, threshold] produce no orders."""
-    mock_get_portfolio.return_value = _make_portfolio([])
-    mock_fetch.return_value = pd.DataFrame({"Close": [100.0]})
-
+    broker = FakeBroker(positions=[], equity=100_000.0)
     scores = {"AAPL": 0.1, "MSFT": -0.2, "GOOG": 0.0}
-    actions = execute_ml_signals(scores, threshold=0.3, max_positions=5)
+
+    actions = execute_ml_signals(scores, threshold=0.3, max_positions=5, broker=broker)
 
     assert actions == []
-    mock_buy.assert_not_called()
-    mock_sell.assert_not_called()
+    assert broker.orders == []
 
 
-@patch("strategies.ml_execution.fetch_ohlcv")
-@patch("strategies.ml_execution.get_portfolio")
-@patch("strategies.ml_execution.buy")
-@patch("strategies.ml_execution.sell")
-def test_max_positions_limits_buys(mock_sell, mock_buy, mock_get_portfolio, mock_fetch):
+def test_max_positions_limits_buys():
     """Only top max_positions tickers are bought."""
-    mock_get_portfolio.return_value = _make_portfolio([])
-    mock_fetch.return_value = pd.DataFrame({"Close": [50.0]})
-
+    broker = FakeBroker(positions=[], equity=100_000.0)
     scores = {f"T{i}": 0.9 - i * 0.01 for i in range(10)}
-    actions = execute_ml_signals(scores, threshold=0.3, max_positions=3)
 
-    buy_actions = [a for a in actions if a.startswith("BUY")]
-    assert len(buy_actions) == 3
+    execute_ml_signals(scores, threshold=0.3, max_positions=3, broker=broker)
+
+    assert len(_buys_for(broker)) == 3
 
 
-@patch("strategies.ml_execution.fetch_ohlcv")
-@patch("strategies.ml_execution.get_portfolio")
-@patch("strategies.ml_execution.buy")
-@patch("strategies.ml_execution.sell")
-def test_empty_scores_returns_empty(mock_sell, mock_buy, mock_get_portfolio, mock_fetch):
+def test_empty_scores_returns_empty():
     """Empty scores dict returns empty actions list without touching any API."""
-    actions = execute_ml_signals({}, threshold=0.3, max_positions=5)
+    broker = FakeBroker()
+
+    actions = execute_ml_signals({}, threshold=0.3, max_positions=5, broker=broker)
 
     assert actions == []
-    mock_get_portfolio.assert_not_called()
-    mock_buy.assert_not_called()
-    mock_sell.assert_not_called()
+    assert broker.orders == []
 
 
-@patch("strategies.ml_execution.fetch_ohlcv")
-@patch("strategies.ml_execution.get_portfolio")
-@patch("strategies.ml_execution.buy")
-@patch("strategies.ml_execution.sell")
-def test_no_duplicate_buy_for_existing_position(mock_sell, mock_buy, mock_get_portfolio, mock_fetch):
+def test_no_duplicate_buy_for_existing_position():
     """A ticker already in the portfolio is not bought again even with high score."""
-    mock_get_portfolio.return_value = _make_portfolio(["AAPL"])
-    mock_fetch.return_value = pd.DataFrame({"Close": [180.0]})
-
+    broker = FakeBroker(positions=[_held("AAPL", qty=5.0)], equity=100_000.0)
     scores = {"AAPL": 0.95}
-    actions = execute_ml_signals(scores, threshold=0.3, max_positions=5)
 
-    # No buy since already held; no sell since not bearish
-    assert "BUY AAPL" not in actions
-    assert "SELL AAPL" not in actions
-    mock_buy.assert_not_called()
+    actions = execute_ml_signals(scores, threshold=0.3, max_positions=5, broker=broker)
+
+    assert _buys_for(broker) == []
+    assert _sells_for(broker) == []
+    assert actions == []
 
 
-@patch("strategies.ml_execution.fetch_ohlcv")
-@patch("strategies.ml_execution.get_portfolio")
-@patch("strategies.ml_execution.buy")
-@patch("strategies.ml_execution.sell")
-def test_price_fetch_failure_skips_order(mock_sell, mock_buy, mock_get_portfolio, mock_fetch):
+def test_price_fetch_failure_skips_order():
     """If price cannot be fetched, the order is skipped (no crash)."""
-    mock_get_portfolio.return_value = _make_portfolio([])
-    mock_fetch.return_value = None  # simulates fetch failure
-
+    broker = FakeBroker(positions=[], equity=100_000.0)
     scores = {"AAPL": 0.8}
-    actions = execute_ml_signals(scores, threshold=0.3, max_positions=5)
+
+    with patch("strategies.ml_execution.fetch_ohlcv", return_value=None):
+        actions = execute_ml_signals(scores, threshold=0.3, max_positions=5, broker=broker)
 
     assert actions == []
-    mock_buy.assert_not_called()
+    assert broker.orders == []
 
 
-@patch("strategies.ml_execution.fetch_ohlcv")
-@patch("strategies.ml_execution.get_portfolio")
-@patch("strategies.ml_execution.buy")
-@patch("strategies.ml_execution.sell")
-def test_buy_failure_does_not_raise(mock_sell, mock_buy, mock_get_portfolio, mock_fetch):
-    """A buy() exception is caught and logged; remaining orders still proceed."""
-    mock_get_portfolio.return_value = _make_portfolio([])
-    mock_fetch.return_value = pd.DataFrame({"Close": [100.0]})
-    mock_buy.side_effect = [ValueError("insufficient cash"), None]
-
+def test_buy_failure_does_not_raise():
+    """A broker.place_order exception is caught; remaining orders still proceed."""
+    broker = FakeBroker(positions=[], equity=100_000.0, raise_on="order:FAIL")
     scores = {"FAIL": 0.9, "OK": 0.8}
-    actions = execute_ml_signals(scores, threshold=0.3, max_positions=5)
 
-    # FAIL raises, OK succeeds
-    assert "BUY OK" in actions
-    assert "BUY FAIL" not in actions
+    actions = execute_ml_signals(scores, threshold=0.3, max_positions=5, broker=broker)
+
+    assert "OK" in _buys_for(broker)
+    assert "FAIL" not in _buys_for(broker)
+    assert any(a.startswith("BUY OK") for a in actions)
+
+
+def test_kelly_sizing_scales_with_equity_and_score():
+    """Larger equity and higher score both produce more shares."""
+    small = FakeBroker(positions=[], equity=10_000.0)
+    large = FakeBroker(positions=[], equity=1_000_000.0)
+
+    execute_ml_signals({"AAPL": 0.9}, threshold=0.3, max_positions=5, broker=small)
+    execute_ml_signals({"AAPL": 0.9}, threshold=0.3, max_positions=5, broker=large)
+
+    small_qty = small.orders[0]["qty"]
+    large_qty = large.orders[0]["qty"]
+    assert large_qty > small_qty
+    assert small_qty >= 1
+
+    low_score = FakeBroker(positions=[], equity=1_000_000.0)
+    high_score = FakeBroker(positions=[], equity=1_000_000.0)
+    execute_ml_signals({"AAPL": 0.4}, threshold=0.3, max_positions=5, broker=low_score)
+    execute_ml_signals({"AAPL": 0.95}, threshold=0.3, max_positions=5, broker=high_score)
+    assert high_score.orders[0]["qty"] > low_score.orders[0]["qty"]
+
+
+def test_regime_multiplier_reduces_size_in_high_vol():
+    """high_vol regime halves the Kelly fraction → smaller position sizes."""
+    normal = FakeBroker(positions=[], equity=100_000.0)
+    stormy = FakeBroker(positions=[], equity=100_000.0)
+
+    with patch("strategies.ml_execution._current_regime", return_value="trending_bull"):
+        execute_ml_signals({"AAPL": 0.9}, threshold=0.3, max_positions=5, broker=normal)
+    with patch("strategies.ml_execution._current_regime", return_value="high_vol"):
+        execute_ml_signals({"AAPL": 0.9}, threshold=0.3, max_positions=5, broker=stormy)
+
+    assert stormy.orders[0]["qty"] < normal.orders[0]["qty"]
+
+
+def test_positions_fetch_failure_falls_back_to_empty():
+    """If get_positions raises, treat the portfolio as empty and still place buys."""
+    broker = FakeBroker(positions=[], equity=100_000.0, raise_on="positions")
+    scores = {"AAPL": 0.8}
+
+    actions = execute_ml_signals(scores, threshold=0.3, max_positions=5, broker=broker)
+
+    assert "AAPL" in _buys_for(broker)
+    assert any(a.startswith("BUY AAPL") for a in actions)
