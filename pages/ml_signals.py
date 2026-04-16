@@ -1,15 +1,13 @@
 """
 pages/ml_signals.py — ML Alpha Signals tab.
 
-Exposes the LightGBM alpha model pipeline:
-  - Train / retrain the model on a selected ticker universe
-  - Display training IC / ICIR metrics
-  - Show current alpha scores per ticker (colour-coded bar chart)
-  - Feature importance chart (top 20)
-  - Information Coefficient table for each feature
+Exposes three parallel alpha model pipelines:
+  - LightGBM gradient-boosting model (non-linear, high-capacity)
+  - Ridge regression linear model (interpretable factor loadings)
+  - Ensemble blend of the two (weighted average, reduces overfitting)
 
 All heavy computation is wrapped in st.spinner() to avoid blocking the UI.
-Optional-dep imports (lightgbm, etc.) are performed inside button blocks so
+Optional-dep imports (lightgbm, sklearn) are performed inside button blocks so
 that a missing package does not crash the entire Streamlit app at startup.
 """
 from __future__ import annotations
@@ -25,9 +23,9 @@ from screener.screener import TICKERS
 def render() -> None:
     st.subheader("ML Alpha Signals")
     st.caption(
-        "LightGBM gradient-boosting model trained cross-sectionally to predict "
-        "5-day forward returns.  Signals are ranked and normalised to [−1, 1] across "
-        "the universe.  Falls back to momentum score when no model has been trained."
+        "Three parallel alpha models trained cross-sectionally to predict 5-day forward returns. "
+        "LightGBM: non-linear, high-capacity.  Ridge: linear, interpretable factor loadings. "
+        "Ensemble: weighted blend of both.  All signals ranked and normalised to [−1, 1]."
     )
 
     # ── Universe & period selectors ───────────────────────────────────────────
@@ -49,9 +47,13 @@ def render() -> None:
         return
 
     # ── Train / Retrain ───────────────────────────────────────────────────────
-    col_btn, col_status = st.columns([2, 3])
-    with col_btn:
-        do_train = st.button("Train / Retrain Model", type="primary", key="ml_train_btn")
+    col_lgbm, col_regime, col_ridge = st.columns(3)
+    with col_lgbm:
+        do_train = st.button("Train LGBM Baseline", type="primary", key="ml_train_btn")
+    with col_regime:
+        do_train_regime = st.button("Train Regime Models", key="ml_train_regime_btn")
+    with col_ridge:
+        do_train_ridge = st.button("Train Ridge Model", key="ml_train_ridge_btn")
 
     if do_train:
         with st.spinner("Building feature matrix and training LightGBM alpha model…"):
@@ -67,52 +69,302 @@ def render() -> None:
                     metrics = model.train(selected_tickers, period=period)
                     st.session_state["ml_model_instance"] = model
                     st.session_state["ml_train_metrics"] = metrics
-                    st.success("Model trained successfully.")
+                    st.success("LGBM baseline model trained successfully.")
             except Exception as exc:
                 st.error(f"Training failed: {exc}")
 
-    # ── Training metrics ──────────────────────────────────────────────────────
+    if do_train_regime:
+        with st.spinner("Fetching SPY/VIX regime history and training per-regime models…"):
+            try:
+                from strategies.ml_signal import _LGBM_AVAILABLE, MLSignal
+                if not _LGBM_AVAILABLE:
+                    st.error("lightgbm is not installed.")
+                else:
+                    model = st.session_state.get("ml_model_instance") or MLSignal()
+                    regime_results = model.train_regime_models(selected_tickers, period=period)
+                    st.session_state["ml_model_instance"] = model
+                    st.session_state["ml_regime_results"] = regime_results
+                    if regime_results:
+                        st.success(
+                            f"Regime models trained for: {', '.join(regime_results.keys())}"
+                        )
+                    else:
+                        st.warning(
+                            "No regimes had enough samples to train. "
+                            "Try a longer training period."
+                        )
+            except Exception as exc:
+                st.error(f"Regime training failed: {exc}")
+
+    if do_train_ridge:
+        with st.spinner("Building feature matrix and training Ridge linear model…"):
+            try:
+                from strategies.linear_signal import _SKLEARN_AVAILABLE, LinearSignal
+                if not _SKLEARN_AVAILABLE:
+                    st.error(
+                        "scikit-learn is not installed. "
+                        "Run `pip install scikit-learn>=1.3.0` and restart the app."
+                    )
+                else:
+                    ridge_model = LinearSignal()
+                    ridge_metrics = ridge_model.train(selected_tickers, period=period)
+                    st.session_state["ridge_model_instance"] = ridge_model
+                    st.session_state["ridge_train_metrics"] = ridge_metrics
+                    st.success("Ridge model trained successfully.")
+            except Exception as exc:
+                st.error(f"Ridge training failed: {exc}")
+
+    # ── LGBM training metrics ─────────────────────────────────────────────────
     if "ml_train_metrics" in st.session_state:
         m = st.session_state["ml_train_metrics"]
+        st.caption("**LGBM Baseline Metrics**")
         mc1, mc2, mc3, mc4 = st.columns(4)
         mc1.metric("Train IC",   f"{m.get('train_ic', 0):.4f}")
         mc2.metric("Test IC",    f"{m.get('test_ic', 0):.4f}")
         mc3.metric("Train ICIR", f"{m.get('train_icir', 0):.3f}")
         mc4.metric("Test ICIR",  f"{m.get('test_icir', 0):.3f}")
 
+    # ── Ridge training metrics ────────────────────────────────────────────────
+    if "ridge_train_metrics" in st.session_state:
+        rm = st.session_state["ridge_train_metrics"]
+        st.caption("**Ridge Linear Metrics**")
+        rc1, rc2, rc3, rc4 = st.columns(4)
+        rc1.metric("Train IC",   f"{rm.get('train_ic', 0):.4f}")
+        rc2.metric("Test IC",    f"{rm.get('test_ic', 0):.4f}")
+        rc3.metric("Train ICIR", f"{rm.get('train_icir', 0):.3f}")
+        rc4.metric("Test ICIR",  f"{rm.get('test_icir', 0):.3f}")
+
+    # ── Regime model metrics ──────────────────────────────────────────────────
+    if "ml_regime_results" in st.session_state:
+        rr = st.session_state["ml_regime_results"]
+        if rr:
+            st.markdown("**Regime Model Performance**")
+            rows = [
+                {
+                    "Regime": regime,
+                    "Train IC": f"{v['train_ic']:.4f}",
+                    "Test IC": f"{v['test_ic']:.4f}",
+                    "Train ICIR": f"{v['train_icir']:.3f}",
+                    "Test ICIR": f"{v['test_icir']:.3f}",
+                    "N Train": v["n_train"],
+                    "N Test": v["n_test"],
+                }
+                for regime, v in rr.items()
+            ]
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
     st.divider()
 
     # ── Alpha scores ──────────────────────────────────────────────────────────
     st.markdown("#### Current Alpha Scores")
-    if st.button("Compute Alpha Scores", key="ml_predict_btn"):
-        with st.spinner("Scoring tickers…"):
-            try:
-                from strategies.ml_signal import MLSignal
-                model = st.session_state.get("ml_model_instance") or MLSignal()
-                scores = model.predict(selected_tickers, period="6mo")
-                st.session_state["ml_scores"] = scores
-            except Exception as exc:
-                st.error(f"Prediction failed: {exc}")
+    st.caption(
+        "Compute all three signals at once, or use individual tabs to score each model separately."
+    )
 
-    if "ml_scores" in st.session_state:
-        _render_alpha_chart(st.session_state["ml_scores"])
+    if st.button("Compute All Scores", key="ml_compute_all_btn", type="primary"):
+        with st.spinner("Scoring all three models…"):
+            try:
+                from strategies.ensemble_signal import blend_signals
+                from strategies.linear_signal import LinearSignal
+                from strategies.ml_signal import MLSignal
+
+                lgbm_model = st.session_state.get("ml_model_instance") or MLSignal()
+                lgbm_scores = lgbm_model.predict(selected_tickers, period="6mo")
+                st.session_state["ml_model_instance"] = lgbm_model
+                st.session_state["ml_scores"] = lgbm_scores
+
+                ridge_model = st.session_state.get("ridge_model_instance") or LinearSignal()
+                ridge_scores = ridge_model.predict(selected_tickers, period="6mo")
+                st.session_state["ridge_model_instance"] = ridge_model
+                st.session_state["ridge_scores"] = ridge_scores
+
+                ensemble_scores = blend_signals(lgbm_scores, ridge_scores)
+                st.session_state["ensemble_scores"] = ensemble_scores
+            except Exception as exc:
+                st.error(f"Scoring failed: {exc}")
+
+    tab_lgbm, tab_ridge, tab_ensemble = st.tabs(["LGBM", "Ridge", "Ensemble"])
+
+    with tab_lgbm:
+        if st.button("Compute LGBM Scores", key="ml_predict_btn"):
+            with st.spinner("Scoring tickers with LGBM…"):
+                try:
+                    from strategies.ml_signal import MLSignal
+                    model = st.session_state.get("ml_model_instance") or MLSignal()
+                    scores = model.predict(selected_tickers, period="6mo")
+                    st.session_state["ml_scores"] = scores
+                except Exception as exc:
+                    st.error(f"Prediction failed: {exc}")
+        if "ml_scores" in st.session_state:
+            _render_alpha_chart(st.session_state["ml_scores"])
+
+    with tab_ridge:
+        if st.button("Compute Ridge Scores", key="ridge_predict_btn"):
+            with st.spinner("Scoring tickers with Ridge…"):
+                try:
+                    from strategies.linear_signal import LinearSignal
+                    ridge_model = st.session_state.get("ridge_model_instance") or LinearSignal()
+                    ridge_scores = ridge_model.predict(selected_tickers, period="6mo")
+                    st.session_state["ridge_scores"] = ridge_scores
+                except Exception as exc:
+                    st.error(f"Ridge prediction failed: {exc}")
+        if "ridge_scores" in st.session_state:
+            _render_alpha_chart(st.session_state["ridge_scores"])
+
+    with tab_ensemble:
+        if st.button("Compute Ensemble Scores", key="ensemble_predict_btn"):
+            with st.spinner("Blending LGBM + Ridge scores…"):
+                try:
+                    from strategies.ensemble_signal import blend_signals
+                    lgbm_sc = st.session_state.get("ml_scores", {})
+                    ridge_sc = st.session_state.get("ridge_scores", {})
+                    if not lgbm_sc and not ridge_sc:
+                        st.warning("Compute LGBM and/or Ridge scores first.")
+                    else:
+                        st.session_state["ensemble_scores"] = blend_signals(lgbm_sc, ridge_sc)
+                except Exception as exc:
+                    st.error(f"Ensemble blending failed: {exc}")
+        if "ensemble_scores" in st.session_state:
+            _render_alpha_chart(st.session_state["ensemble_scores"])
 
     st.divider()
 
-    # ── Feature Importance ────────────────────────────────────────────────────
-    st.markdown("#### Feature Importance (Top 20)")
-    with st.spinner("Loading feature importances…"):
-        try:
-            from strategies.ml_signal import MLSignal
-            model = st.session_state.get("ml_model_instance") or MLSignal()
-            fi_df = model.feature_importance()
-        except Exception:
-            fi_df = pd.DataFrame(columns=["feature", "importance"])
+    # ── Backtest ML Signal ────────────────────────────────────────────────────
+    st.markdown("#### Backtest ML Signal")
+    st.caption(
+        "Runs the trained ML model across all historical dates for a single ticker "
+        "(using the full universe for cross-sectional z-scoring) and backtests the "
+        "resulting long/flat signal through the event-driven engine."
+    )
 
-    if fi_df.empty:
-        st.info("No trained model found. Click **Train / Retrain Model** to train one.")
-    else:
-        _render_feature_importance(fi_df.head(20))
+    if len(selected_tickers) >= 1:
+        focus_ticker = st.selectbox(
+            "Focus ticker for backtest",
+            options=selected_tickers,
+            key="ml_backtest_ticker",
+        )
+        if st.button("Run ML Backtest", key="ml_backtest_btn"):
+            with st.spinner(f"Building signals for {focus_ticker} and running backtest…"):
+                try:
+                    from backtester.engine import build_equity_chart, run_signal_backtest
+                    from data.features import _FEATURE_COLS, build_feature_matrix
+                    from data.fetcher import fetch_ohlcv
+                    from strategies.ml_signal import MLSignal
+
+                    model = st.session_state.get("ml_model_instance") or MLSignal()
+                    if model._model is None:
+                        st.warning("No trained model found. Click **Train / Retrain Model** first.")
+                    else:
+                        fm = build_feature_matrix(selected_tickers, period=period)
+                        if fm.empty:
+                            st.error("Feature matrix is empty — check tickers and period.")
+                        else:
+                            feature_cols = [c for c in _FEATURE_COLS if c in fm.columns]
+                            try:
+                                ticker_fm = fm.xs(focus_ticker, level="ticker")[feature_cols].fillna(0.0)
+                            except KeyError:
+                                st.error(f"{focus_ticker} not found in feature matrix.")
+                                ticker_fm = None
+
+                            if ticker_fm is not None and not ticker_fm.empty:
+                                raw_preds = model._model.predict(ticker_fm.values)
+                                signals = pd.Series(raw_preds, index=ticker_fm.index)
+
+                                ohlcv = fetch_ohlcv(focus_ticker, period)
+                                if ohlcv is None or ohlcv.empty:
+                                    st.error(f"Could not fetch OHLCV data for {focus_ticker}.")
+                                else:
+                                    bt_result = run_signal_backtest(
+                                        ohlcv, signals,
+                                        strategy_name="ML Signal",
+                                        ticker=focus_ticker,
+                                    )
+                                    st.session_state["ml_backtest_result"] = bt_result
+
+                except Exception as exc:
+                    st.error(f"Backtest failed: {exc}")
+
+    if "ml_backtest_result" in st.session_state:
+        r = st.session_state["ml_backtest_result"]
+        bc1, bc2, bc3, bc4 = st.columns(4)
+        bc1.metric("Total Return", f"{r.total_return_pct:.2f}%")
+        bc2.metric("Sharpe", f"{r.sharpe_ratio:.3f}")
+        bc3.metric("Max DD", f"{r.max_drawdown_pct:.2f}%")
+        bc4.metric("Trades", str(r.num_trades))
+        from backtester.engine import build_equity_chart
+        st.plotly_chart(build_equity_chart(r), use_container_width=True)
+
+    st.divider()
+
+    # ── Execute ML Signals ────────────────────────────────────────────────────
+    st.markdown("#### Execute ML Signals (Paper Trading)")
+    st.caption(
+        "Translates current alpha scores into paper trading orders: "
+        "long top-scoring tickers, exit bearish positions."
+    )
+    exec_threshold = st.slider(
+        "Score threshold", min_value=0.1, max_value=0.9, value=0.3, step=0.05,
+        key="ml_exec_threshold",
+        help="Minimum |score| required to act. Longs: score > threshold. Exits: score < −threshold.",
+    )
+    exec_max_pos = st.number_input(
+        "Max long positions", min_value=1, max_value=20, value=5, step=1,
+        key="ml_exec_max_pos",
+    )
+
+    if st.button("Execute Signals (Paper)", key="ml_exec_btn", type="secondary"):
+        if "ml_scores" not in st.session_state:
+            st.warning("Compute Alpha Scores first.")
+        else:
+            with st.spinner("Submitting paper orders…"):
+                try:
+                    from strategies.ml_execution import execute_ml_signals
+                    actions = execute_ml_signals(
+                        st.session_state["ml_scores"],
+                        threshold=exec_threshold,
+                        max_positions=int(exec_max_pos),
+                    )
+                    if actions:
+                        st.success(f"Executed {len(actions)} order(s): {', '.join(actions)}")
+                    else:
+                        st.info("No orders to execute — scores within neutral band or no changes needed.")
+                except Exception as exc:
+                    st.error(f"Execution failed: {exc}")
+
+    st.divider()
+
+    # ── Feature Importance & Coefficients ────────────────────────────────────
+    fi_col, coef_col = st.columns(2)
+
+    with fi_col:
+        st.markdown("#### LGBM Feature Importance (Top 20)")
+        with st.spinner("Loading feature importances…"):
+            try:
+                from strategies.ml_signal import MLSignal
+                lgbm_inst = st.session_state.get("ml_model_instance") or MLSignal()
+                fi_df = lgbm_inst.feature_importance()
+            except Exception:
+                fi_df = pd.DataFrame(columns=["feature", "importance"])
+
+        if fi_df.empty:
+            st.info("No LGBM model. Click **Train LGBM Baseline** to train one.")
+        else:
+            _render_feature_importance(fi_df.head(20))
+
+    with coef_col:
+        st.markdown("#### Ridge Feature Coefficients (Top 20)")
+        with st.spinner("Loading Ridge coefficients…"):
+            try:
+                from strategies.linear_signal import LinearSignal
+                ridge_inst = st.session_state.get("ridge_model_instance") or LinearSignal()
+                coef_df = ridge_inst.feature_coefficients()
+            except Exception:
+                coef_df = pd.DataFrame(columns=["feature", "coefficient"])
+
+        if coef_df.empty:
+            st.info("No Ridge model. Click **Train Ridge Model** to train one.")
+        else:
+            _render_feature_coefficients(coef_df.head(20))
 
     st.divider()
 
@@ -185,6 +437,26 @@ def _render_feature_importance(fi_df: pd.DataFrame) -> None:
         xaxis_title="Importance (split count)",
         yaxis_title="Feature",
         height=max(300, len(fi_df) * 28),
+        margin=dict(l=140, r=40, t=50, b=40),
+        yaxis=dict(autorange="reversed"),
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def _render_feature_coefficients(coef_df: pd.DataFrame) -> None:
+    """Horizontal bar chart of Ridge coefficients (positive=green, negative=red)."""
+    colors = ["#2ecc71" if v >= 0 else "#e74c3c" for v in coef_df["coefficient"].values]
+    fig = go.Figure(go.Bar(
+        x=coef_df["coefficient"].values,
+        y=coef_df["feature"].values,
+        orientation="h",
+        marker_color=colors,
+    ))
+    fig.update_layout(
+        title="Ridge Feature Coefficients",
+        xaxis_title="Coefficient",
+        yaxis_title="Feature",
+        height=max(300, len(coef_df) * 28),
         margin=dict(l=140, r=40, t=50, b=40),
         yaxis=dict(autorange="reversed"),
     )

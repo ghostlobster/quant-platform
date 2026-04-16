@@ -56,6 +56,9 @@ def _widget_mock() -> MagicMock:
     m.columns.side_effect = (
         lambda spec, **kw: [MagicMock() for _ in range(spec if isinstance(spec, int) else len(spec))]
     )
+    m.tabs.side_effect = (
+        lambda labels, **kw: [MagicMock() for _ in labels]
+    )
     return m
 
 
@@ -670,4 +673,66 @@ class TestPagesMlSignals:
             columns=["feature", "importance"]
         )
         with patch("strategies.ml_signal.MLSignal", return_value=mock_model):
+            pg_ml_signals.render()
+
+    def _mock_linear_signal(self):
+        mock = MagicMock()
+        mock.feature_coefficients.return_value = pd.DataFrame(
+            {"feature": ["ret_5d", "vol_ratio_20d"], "coefficient": [0.3, -0.1]}
+        )
+        mock.predict.return_value = {"AAPL": 0.2, "MSFT": 0.5}
+        mock.train.return_value = {
+            "train_ic": 0.04, "test_ic": 0.02,
+            "train_icir": 0.5, "test_icir": 0.3,
+            "n_train_samples": 800, "n_test_samples": 200,
+        }
+        return mock
+
+    def test_render_ridge_train_button(self):
+        """Cover Ridge training path when Train Ridge Model button is clicked."""
+        _reset_session()
+
+        def _btn(label, **kw):
+            return kw.get("key") == "ml_train_ridge_btn"
+
+        _ST.button.side_effect = _btn
+        mock_ridge = self._mock_linear_signal()
+        with (
+            patch("strategies.ml_signal.MLSignal", return_value=self._mock_ml_signal()),
+            patch("strategies.linear_signal._SKLEARN_AVAILABLE", True),
+            patch("strategies.linear_signal.LinearSignal", return_value=mock_ridge),
+        ):
+            pg_ml_signals.render()
+        _ST.button.side_effect = None
+        _ST.button.return_value = False
+
+    def test_render_compute_all_scores_button(self):
+        """Cover 'Compute All Scores' path that populates LGBM, Ridge, and ensemble scores."""
+        _reset_session()
+
+        def _btn(label, **kw):
+            return kw.get("key") == "ml_compute_all_btn"
+
+        _ST.button.side_effect = _btn
+        with (
+            patch("strategies.ml_signal.MLSignal", return_value=self._mock_ml_signal()),
+            patch("strategies.linear_signal.LinearSignal", return_value=self._mock_linear_signal()),
+            patch("strategies.ensemble_signal.blend_signals", return_value={"AAPL": 0.3}),
+        ):
+            pg_ml_signals.render()
+        _ST.button.side_effect = None
+        _ST.button.return_value = False
+
+    def test_render_ridge_metrics_display(self):
+        """Page shows Ridge metric tiles when ridge_train_metrics is in session_state."""
+        _reset_session()
+        _ST.session_state["ridge_train_metrics"] = {
+            "train_ic": 0.04, "test_ic": 0.02,
+            "train_icir": 0.5, "test_icir": 0.3,
+        }
+        _ST.session_state["ridge_scores"] = {"AAPL": 0.2, "MSFT": 0.5}
+        with (
+            patch("strategies.ml_signal.MLSignal", return_value=self._mock_ml_signal()),
+            patch("strategies.linear_signal.LinearSignal", return_value=self._mock_linear_signal()),
+        ):
             pg_ml_signals.render()

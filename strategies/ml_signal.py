@@ -10,7 +10,10 @@ no trained model checkpoint is present.
 
 ENV vars
 --------
-    LGBM_ALPHA_MODEL_PATH   path to pickle checkpoint (default: models/lgbm_alpha.pkl)
+    LGBM_ALPHA_MODEL_PATH       path to baseline model pickle
+                                (default: models/lgbm_alpha.pkl)
+    LGBM_REGIME_MODELS_PATH     path to regime-conditioned models dict pickle
+                                (default: models/lgbm_regime_models.pkl)
 
 Optional dependencies (guarded — app loads without them):
     lightgbm >= 4.0.0
@@ -25,7 +28,9 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from analysis.regime import get_live_regime
 from data.features import _FEATURE_COLS, build_feature_matrix
+from data.fetcher import fetch_ohlcv
 from utils.logger import get_logger
 
 log = get_logger(__name__)
@@ -39,7 +44,12 @@ except ImportError:
     _LGBM_AVAILABLE = False
 
 _DEFAULT_MODEL_PATH = os.environ.get("LGBM_ALPHA_MODEL_PATH", "models/lgbm_alpha.pkl")
+_DEFAULT_REGIME_MODELS_PATH = os.environ.get(
+    "LGBM_REGIME_MODELS_PATH", "models/lgbm_regime_models.pkl"
+)
 _TARGET_COL = "fwd_ret_5d"
+# Minimum (date, ticker) rows per regime required to train a regime-specific model
+_MIN_REGIME_SAMPLES = 100
 
 _DEFAULT_LGBM_PARAMS: dict = {
     "n_estimators": 300,
@@ -55,29 +65,45 @@ _DEFAULT_LGBM_PARAMS: dict = {
 
 class MLSignal:
     """
-    LightGBM cross-sectional alpha model.
+    LightGBM cross-sectional alpha model with optional regime conditioning.
 
-    Falls back to momentum score when lightgbm is unavailable or no
-    checkpoint has been trained yet.
+    Maintains two model tiers:
+      1. Baseline model  (_model)          — trained on all regimes combined
+      2. Regime models   (_regime_models)  — one model per market regime,
+                                             trained only on dates matching
+                                             that regime's market state
+
+    predict() automatically selects the regime-specific model for the current
+    market state (via analysis.regime.get_live_regime), falling back to the
+    baseline model, then to momentum composite scores.
 
     Attributes
     ----------
-    _model      : fitted LGBMRegressor or None
-    _model_path : filesystem path for checkpoint persistence
+    _model             : fitted LGBMRegressor or None  (baseline)
+    _regime_models     : dict[str, LGBMRegressor]      (regime-conditioned)
+    _model_path        : filesystem path for baseline checkpoint
+    _regime_model_path : filesystem path for regime models dict checkpoint
     """
 
-    def __init__(self, model_path: str | None = None) -> None:
+    def __init__(
+        self,
+        model_path: str | None = None,
+        regime_model_path: str | None = None,
+    ) -> None:
         self._model_path: str = model_path or _DEFAULT_MODEL_PATH
+        self._regime_model_path: str = regime_model_path or _DEFAULT_REGIME_MODELS_PATH
         self._model = None
+        self._regime_models: dict = {}
         self._load_if_available()
+        self._load_regime_models_if_available()
 
     # ── Model loading ─────────────────────────────────────────────────────────
 
     def _load_if_available(self) -> None:
-        """Load a persisted model checkpoint if it exists (mirrors rl_sizer.py pattern)."""
+        """Load a persisted baseline model checkpoint if it exists."""
         path = Path(self._model_path)
         if not path.exists():
-            log.info("ml_signal: no checkpoint found, will use fallback", path=str(path))
+            log.info("ml_signal: no baseline checkpoint found, will use fallback", path=str(path))
             return
         try:
             if not _LGBM_AVAILABLE:
@@ -85,11 +111,29 @@ class MLSignal:
                 return
             with open(path, "rb") as f:
                 self._model = pickle.load(f)
-            log.info("ml_signal: loaded model checkpoint", path=str(path))
+            log.info("ml_signal: loaded baseline model checkpoint", path=str(path))
         except Exception as exc:
-            log.warning("ml_signal: failed to load checkpoint", path=str(path), error=str(exc))
+            log.warning("ml_signal: failed to load baseline checkpoint", path=str(path), error=str(exc))
 
-    # ── Training ──────────────────────────────────────────────────────────────
+    def _load_regime_models_if_available(self) -> None:
+        """Load persisted regime-conditioned model checkpoints if they exist."""
+        path = Path(self._regime_model_path)
+        if not path.exists():
+            return
+        try:
+            if not _LGBM_AVAILABLE:
+                return
+            with open(path, "rb") as f:
+                self._regime_models = pickle.load(f)
+            log.info(
+                "ml_signal: loaded regime models",
+                path=str(path),
+                regimes=list(self._regime_models.keys()),
+            )
+        except Exception as exc:
+            log.warning("ml_signal: failed to load regime models", path=str(path), error=str(exc))
+
+    # ── Training — baseline ───────────────────────────────────────────────────
 
     def train(
         self,
@@ -99,8 +143,8 @@ class MLSignal:
         lgbm_params: dict | None = None,
     ) -> dict[str, float]:
         """
-        Build feature matrix, train LightGBM, evaluate on held-out test split,
-        persist the model, and write metadata to quant.db.
+        Build feature matrix, train baseline LightGBM, evaluate on held-out
+        test split, persist the model, and write metadata to quant.db.
 
         Parameters
         ----------
@@ -177,7 +221,7 @@ class MLSignal:
         Path(self._model_path).parent.mkdir(parents=True, exist_ok=True)
         with open(self._model_path, "wb") as f:
             pickle.dump(model, f)
-        log.info("ml_signal: checkpoint saved", path=self._model_path)
+        log.info("ml_signal: baseline checkpoint saved", path=self._model_path)
 
         # Write metadata to quant.db
         self._write_metadata(
@@ -195,6 +239,174 @@ class MLSignal:
             "n_train_samples": int(len(X_train)),
             "n_test_samples": int(len(X_test)),
         }
+
+    # ── Training — regime-conditioned ─────────────────────────────────────────
+
+    def train_regime_models(
+        self,
+        tickers: list[str],
+        period: str = "2y",
+        min_regime_samples: int = _MIN_REGIME_SAMPLES,
+        test_size: float = 0.2,
+        lgbm_params: dict | None = None,
+    ) -> dict[str, dict]:
+        """
+        Train one LGBMRegressor per market regime.
+
+        Fetches historical SPY + ^VIX data to label each date in the feature
+        matrix with its market regime, then trains a separate model on each
+        regime's subset.  Only regimes with >= min_regime_samples rows are
+        trained; the rest are silently skipped.
+
+        Parameters
+        ----------
+        tickers            : universe of tickers
+        period             : yfinance period string
+        min_regime_samples : minimum (date, ticker) rows per regime (default 100)
+        test_size          : chronological held-out fraction per regime
+        lgbm_params        : LGBMRegressor parameter overrides
+
+        Returns
+        -------
+        dict mapping regime_label → {train_ic, test_ic, train_icir, test_icir,
+                                      n_train, n_test}
+        Only regimes that were trained are included.
+
+        Raises
+        ------
+        RuntimeError if lightgbm is not installed
+        ValueError   if feature matrix is empty or no usable target rows
+        """
+        if not _LGBM_AVAILABLE:
+            raise RuntimeError("lightgbm is not installed.")
+
+        log.info(
+            "ml_signal: building feature matrix for regime models",
+            tickers=len(tickers),
+            period=period,
+        )
+        fm = build_feature_matrix(tickers, period=period)
+
+        if fm.empty:
+            raise ValueError("Feature matrix is empty — check tickers and period")
+
+        fm = fm.dropna(subset=[_TARGET_COL])
+        if fm.empty:
+            raise ValueError(f"No rows with non-NaN target '{_TARGET_COL}'")
+
+        # Label each row with its market regime
+        regime_series = self._get_historical_regimes(period)
+        if regime_series.empty:
+            raise ValueError("Could not determine historical regimes — SPY data unavailable")
+
+        dates = fm.index.get_level_values("date")
+        regime_labels = regime_series.reindex(dates).fillna("mean_reverting").values
+
+        feature_cols = [c for c in _FEATURE_COLS if c in fm.columns]
+        params = {**_DEFAULT_LGBM_PARAMS, **(lgbm_params or {})}
+
+        from analysis.regime import REGIME_STATES
+
+        results: dict[str, dict] = {}
+        regime_models: dict = {}
+
+        for regime in REGIME_STATES:
+            mask = regime_labels == regime
+            regime_fm = fm[mask]
+
+            if len(regime_fm) < min_regime_samples:
+                log.info(
+                    "ml_signal: skipping regime — insufficient samples",
+                    regime=regime,
+                    n=int(len(regime_fm)),
+                    required=min_regime_samples,
+                )
+                continue
+
+            # Chronological split within this regime's data
+            all_dates = sorted(regime_fm.index.get_level_values("date").unique())
+            split_idx = int(len(all_dates) * (1 - test_size))
+            train_dates = set(all_dates[:split_idx])
+            test_dates = set(all_dates[split_idx:])
+
+            train_df = regime_fm[regime_fm.index.get_level_values("date").isin(train_dates)]
+            test_df = regime_fm[regime_fm.index.get_level_values("date").isin(test_dates)]
+
+            X_train = train_df[feature_cols].values
+            y_train = train_df[_TARGET_COL].values
+            X_test = test_df[feature_cols].values
+            y_test = test_df[_TARGET_COL].values
+
+            model = lgb.LGBMRegressor(**params)
+            model.fit(X_train, y_train)
+
+            train_ic, train_icir = self._eval_ic(model, X_train, y_train)
+            test_ic, test_icir = self._eval_ic(model, X_test, y_test)
+
+            regime_models[regime] = model
+            results[regime] = {
+                "train_ic": float(train_ic),
+                "test_ic": float(test_ic),
+                "train_icir": float(train_icir),
+                "test_icir": float(test_icir),
+                "n_train": int(len(X_train)),
+                "n_test": int(len(X_test)),
+            }
+            log.info(
+                "ml_signal: regime model trained",
+                regime=regime,
+                train_ic=round(train_ic, 4),
+                test_ic=round(test_ic, 4),
+            )
+
+        self._regime_models = regime_models
+        Path(self._regime_model_path).parent.mkdir(parents=True, exist_ok=True)
+        with open(self._regime_model_path, "wb") as f:
+            pickle.dump(regime_models, f)
+        log.info(
+            "ml_signal: regime models saved",
+            path=self._regime_model_path,
+            regimes=list(regime_models.keys()),
+        )
+
+        return results
+
+    def _get_historical_regimes(self, period: str) -> pd.Series:
+        """
+        Return a date-indexed Series of regime labels for the given period.
+
+        Uses SPY 200-day rolling SMA and ^VIX closing level, vectorised.
+        Falls back to 'mean_reverting' for any date with missing VIX data.
+        """
+        spy_df = fetch_ohlcv("SPY", period)
+        vix_df = fetch_ohlcv("^VIX", period)
+
+        if spy_df is None or spy_df.empty:
+            log.warning("ml_signal: could not fetch SPY for regime labels")
+            return pd.Series(dtype=str)
+
+        spy_close = spy_df["Close"].astype(float)
+        sma200 = spy_close.rolling(200, min_periods=1).mean()
+
+        if vix_df is not None and not vix_df.empty:
+            vix_aligned = (
+                vix_df["Close"].astype(float)
+                .reindex(spy_close.index, method="ffill")
+                .fillna(20.0)
+            )
+        else:
+            vix_aligned = pd.Series(20.0, index=spy_close.index)
+
+        # Priority: VIX > 30 → high_vol; VIX 20–30 → mean_reverting;
+        #           VIX < 20 + SPY > SMA200 → trending_bull; else → trending_bear
+        regimes = np.select(
+            [vix_aligned > 30, vix_aligned >= 20, spy_close > sma200],
+            ["high_vol", "mean_reverting", "trending_bull"],
+            default="trending_bear",
+        )
+        return pd.Series(regimes, index=spy_close.index, name="regime")
+
+    # ── Shared eval & metadata helpers ────────────────────────────────────────
 
     @staticmethod
     def _eval_ic(model, X: np.ndarray, y: np.ndarray) -> tuple[float, float]:
@@ -230,12 +442,35 @@ class MLSignal:
         except Exception as exc:
             log.warning("ml_signal: could not write metadata", error=str(exc))
 
+    # ── Model selection ───────────────────────────────────────────────────────
+
+    def _select_model(self, use_regime_model: bool = True):
+        """
+        Select the best available model for the current market state.
+
+        Priority: regime-specific model > baseline model > None (→ fallback).
+        """
+        if use_regime_model and self._regime_models:
+            try:
+                regime_info = get_live_regime()
+                current_regime = regime_info.get("regime")
+                if current_regime and current_regime in self._regime_models:
+                    log.info("ml_signal: using regime model", regime=current_regime)
+                    return self._regime_models[current_regime]
+            except Exception as exc:
+                log.warning(
+                    "ml_signal: regime detection failed, falling back to baseline",
+                    error=str(exc),
+                )
+        return self._model
+
     # ── Prediction ────────────────────────────────────────────────────────────
 
     def predict(
         self,
         tickers: list[str],
         period: str = "6mo",
+        use_regime_model: bool = True,
     ) -> dict[str, float]:
         """
         Return ranked alpha scores in [-1, 1] for each ticker.
@@ -243,18 +478,22 @@ class MLSignal:
         Uses the most recent date's rows from the feature matrix.
         Scores are z-scored raw predictions clipped to [-1, 1].
 
-        Falls back to momentum score when no model is loaded.
+        Model selection priority: regime-specific > baseline > momentum fallback.
 
         Parameters
         ----------
-        tickers : universe to score
-        period  : data window for feature computation
+        tickers          : universe to score
+        period           : data window for feature computation
+        use_regime_model : if True (default), prefer regime-conditioned model
+                           for the current market regime when one is available
 
         Returns
         -------
         dict mapping ticker → score in [-1.0, 1.0]
         """
-        if self._model is None:
+        active_model = self._select_model(use_regime_model)
+
+        if active_model is None:
             return self._momentum_fallback(tickers, period)
 
         try:
@@ -271,7 +510,7 @@ class MLSignal:
             if latest.empty:
                 return self._momentum_fallback(tickers, period)
 
-            raw_preds = self._model.predict(latest.values)
+            raw_preds = active_model.predict(latest.values)
 
             # Z-score and clip to [-1, 1]
             std = raw_preds.std()
