@@ -49,9 +49,11 @@ def render() -> None:
         return
 
     # ── Train / Retrain ───────────────────────────────────────────────────────
-    col_btn, col_status = st.columns([2, 3])
+    col_btn, col_regime_btn = st.columns(2)
     with col_btn:
-        do_train = st.button("Train / Retrain Model", type="primary", key="ml_train_btn")
+        do_train = st.button("Train / Retrain Baseline Model", type="primary", key="ml_train_btn")
+    with col_regime_btn:
+        do_train_regime = st.button("Train Regime Models", key="ml_train_regime_btn")
 
     if do_train:
         with st.spinner("Building feature matrix and training LightGBM alpha model…"):
@@ -67,9 +69,32 @@ def render() -> None:
                     metrics = model.train(selected_tickers, period=period)
                     st.session_state["ml_model_instance"] = model
                     st.session_state["ml_train_metrics"] = metrics
-                    st.success("Model trained successfully.")
+                    st.success("Baseline model trained successfully.")
             except Exception as exc:
                 st.error(f"Training failed: {exc}")
+
+    if do_train_regime:
+        with st.spinner("Fetching SPY/VIX regime history and training per-regime models…"):
+            try:
+                from strategies.ml_signal import _LGBM_AVAILABLE, MLSignal
+                if not _LGBM_AVAILABLE:
+                    st.error("lightgbm is not installed.")
+                else:
+                    model = st.session_state.get("ml_model_instance") or MLSignal()
+                    regime_results = model.train_regime_models(selected_tickers, period=period)
+                    st.session_state["ml_model_instance"] = model
+                    st.session_state["ml_regime_results"] = regime_results
+                    if regime_results:
+                        st.success(
+                            f"Regime models trained for: {', '.join(regime_results.keys())}"
+                        )
+                    else:
+                        st.warning(
+                            "No regimes had enough samples to train. "
+                            "Try a longer training period."
+                        )
+            except Exception as exc:
+                st.error(f"Regime training failed: {exc}")
 
     # ── Training metrics ──────────────────────────────────────────────────────
     if "ml_train_metrics" in st.session_state:
@@ -79,6 +104,25 @@ def render() -> None:
         mc2.metric("Test IC",    f"{m.get('test_ic', 0):.4f}")
         mc3.metric("Train ICIR", f"{m.get('train_icir', 0):.3f}")
         mc4.metric("Test ICIR",  f"{m.get('test_icir', 0):.3f}")
+
+    # ── Regime model metrics ──────────────────────────────────────────────────
+    if "ml_regime_results" in st.session_state:
+        rr = st.session_state["ml_regime_results"]
+        if rr:
+            st.markdown("**Regime Model Performance**")
+            rows = [
+                {
+                    "Regime": regime,
+                    "Train IC": f"{v['train_ic']:.4f}",
+                    "Test IC": f"{v['test_ic']:.4f}",
+                    "Train ICIR": f"{v['train_icir']:.3f}",
+                    "Test ICIR": f"{v['test_icir']:.3f}",
+                    "N Train": v["n_train"],
+                    "N Test": v["n_test"],
+                }
+                for regime, v in rr.items()
+            ]
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
     st.divider()
 
@@ -116,10 +160,10 @@ def render() -> None:
         if st.button("Run ML Backtest", key="ml_backtest_btn"):
             with st.spinner(f"Building signals for {focus_ticker} and running backtest…"):
                 try:
-                    from data.features import _FEATURE_COLS, build_feature_matrix
-                    from strategies.ml_signal import MLSignal
                     from backtester.engine import build_equity_chart, run_signal_backtest
+                    from data.features import _FEATURE_COLS, build_feature_matrix
                     from data.fetcher import fetch_ohlcv
+                    from strategies.ml_signal import MLSignal
 
                     model = st.session_state.get("ml_model_instance") or MLSignal()
                     if model._model is None:

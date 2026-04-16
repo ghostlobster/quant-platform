@@ -399,3 +399,174 @@ def test_purged_walk_forward_consistency_score_range():
     result = purged_walk_forward(_dummy_strategy, fm, n_splits=5, embargo_pct=0.01)
     if result.windows:
         assert 0.0 <= result.consistency_score <= 1.0
+
+
+# ── MLSignal — regime-conditioned models ──────────────────────────────────────
+
+def _make_spy_df(n: int = 252) -> pd.DataFrame:
+    """Minimal SPY-like OHLCV DataFrame."""
+    np.random.seed(1)
+    close = 400 + np.cumsum(np.random.randn(n) * 1.0)
+    idx = pd.date_range("2022-01-01", periods=n, freq="B")
+    return pd.DataFrame({
+        "Open": close * 0.99, "High": close * 1.01,
+        "Low": close * 0.98, "Close": close, "Volume": 1e8,
+    }, index=idx)
+
+
+def _make_vix_df(n: int = 252, vix_value: float = 15.0) -> pd.DataFrame:
+    """Minimal ^VIX-like DataFrame with fixed VIX level."""
+    idx = pd.date_range("2022-01-01", periods=n, freq="B")
+    return pd.DataFrame({"Close": vix_value}, index=idx)
+
+
+def test_get_historical_regimes_returns_series():
+    """_get_historical_regimes returns a date-indexed Series with valid regime labels."""
+    from analysis.regime import REGIME_STATES
+    spy = _make_spy_df(252)
+    vix = _make_vix_df(252, vix_value=15.0)
+
+    model = MLSignal(model_path="/tmp/nonexistent_regime.pkl")
+    with patch("strategies.ml_signal.fetch_ohlcv", side_effect=lambda t, _p: spy if t == "SPY" else vix):
+        regimes = model._get_historical_regimes("2y")
+
+    assert isinstance(regimes, pd.Series)
+    assert len(regimes) == len(spy)
+    assert all(r in REGIME_STATES for r in regimes.values)
+
+
+def test_get_historical_regimes_high_vix():
+    """VIX > 30 → all dates labelled high_vol."""
+    spy = _make_spy_df(100)
+    vix = _make_vix_df(100, vix_value=35.0)
+
+    model = MLSignal(model_path="/tmp/nonexistent_regime2.pkl")
+    with patch("strategies.ml_signal.fetch_ohlcv", side_effect=lambda t, _p: spy if t == "SPY" else vix):
+        regimes = model._get_historical_regimes("1y")
+
+    assert (regimes == "high_vol").all()
+
+
+def test_get_historical_regimes_spy_unavailable():
+    """Returns empty Series when SPY fetch fails."""
+    model = MLSignal(model_path="/tmp/nonexistent_regime3.pkl")
+    with patch("strategies.ml_signal.fetch_ohlcv", return_value=None):
+        regimes = model._get_historical_regimes("1y")
+
+    assert isinstance(regimes, pd.Series)
+    assert regimes.empty
+
+
+def test_select_model_returns_regime_model_when_available():
+    """_select_model returns the regime-specific model when current regime matches."""
+    model = MLSignal(model_path="/tmp/nonexistent_sel.pkl")
+    mock_regime_model = MagicMock()
+    model._regime_models = {"trending_bull": mock_regime_model}
+
+    with patch("strategies.ml_signal.get_live_regime", return_value={"regime": "trending_bull"}):
+        selected = model._select_model(use_regime_model=True)
+
+    assert selected is mock_regime_model
+
+
+def test_select_model_falls_back_to_baseline_when_regime_not_in_models():
+    """_select_model returns baseline when no regime model matches current regime."""
+    model = MLSignal(model_path="/tmp/nonexistent_sel2.pkl")
+    mock_baseline = MagicMock()
+    model._model = mock_baseline
+    model._regime_models = {"trending_bull": MagicMock()}
+
+    with patch("strategies.ml_signal.get_live_regime", return_value={"regime": "high_vol"}):
+        selected = model._select_model(use_regime_model=True)
+
+    assert selected is mock_baseline
+
+
+def test_select_model_falls_back_on_regime_exception():
+    """_select_model returns baseline when regime detection raises."""
+    model = MLSignal(model_path="/tmp/nonexistent_sel3.pkl")
+    mock_baseline = MagicMock()
+    model._model = mock_baseline
+    model._regime_models = {"trending_bull": MagicMock()}
+
+    with patch("strategies.ml_signal.get_live_regime", side_effect=RuntimeError("network error")):
+        selected = model._select_model(use_regime_model=True)
+
+    assert selected is mock_baseline
+
+
+def test_select_model_skips_regime_when_disabled():
+    """_select_model returns baseline directly when use_regime_model=False."""
+    model = MLSignal(model_path="/tmp/nonexistent_sel4.pkl")
+    mock_baseline = MagicMock()
+    model._model = mock_baseline
+    model._regime_models = {"trending_bull": MagicMock()}
+
+    selected = model._select_model(use_regime_model=False)
+
+    assert selected is mock_baseline
+
+
+def test_predict_uses_regime_model():
+    """predict() uses regime model when available for current regime."""
+    model = MLSignal(model_path="/tmp/nonexistent_pred_regime.pkl")
+    mock_regime_model = _make_mock_model()
+    model._regime_models = {"trending_bull": mock_regime_model}
+
+    fm = _make_feature_matrix(n_dates=30, n_tickers=3)
+
+    with patch("strategies.ml_signal.build_feature_matrix", return_value=fm), \
+         patch("strategies.ml_signal.get_live_regime", return_value={"regime": "trending_bull"}):
+        scores = model.predict(["T00", "T01", "T02"], period="6mo", use_regime_model=True)
+
+    assert set(scores.keys()) == {"T00", "T01", "T02"}
+    assert all(-1.0 <= v <= 1.0 for v in scores.values())
+
+
+def test_predict_falls_back_to_momentum_with_no_models():
+    """predict() uses momentum fallback when neither baseline nor regime models exist."""
+    model = MLSignal(model_path="/tmp/nonexistent_pred_fb.pkl")
+    assert model._model is None
+    assert model._regime_models == {}
+
+    with patch("strategies.ml_signal.MLSignal._momentum_fallback",
+               return_value={"AAPL": 0.1}) as mock_fb:
+        scores = model.predict(["AAPL"], period="6mo")
+
+    mock_fb.assert_called_once()
+    assert scores == {"AAPL": 0.1}
+
+
+@pytest.mark.skipif(not _LGBM_AVAILABLE, reason="lightgbm not installed")
+def test_train_regime_models_with_lgbm():
+    """train_regime_models() trains models for regimes with enough samples."""
+    tickers = [f"T{i}" for i in range(6)]
+    # Build a large feature matrix so each regime gets enough samples
+    fm = _make_feature_matrix(n_dates=300, n_tickers=6)
+    spy = _make_spy_df(300)
+    vix = _make_vix_df(300, vix_value=15.0)  # all trending_bull with rising SPY
+
+    with tempfile.NamedTemporaryFile(suffix=".pkl", delete=False) as f:
+        regime_tmp = f.name
+    with tempfile.NamedTemporaryFile(suffix=".pkl", delete=False) as f:
+        base_tmp = f.name
+
+    with patch("strategies.ml_signal.build_feature_matrix", return_value=fm), \
+         patch("strategies.ml_signal.fetch_ohlcv",
+               side_effect=lambda t, _p: spy if t == "SPY" else vix):
+        model = MLSignal(model_path=base_tmp, regime_model_path=regime_tmp)
+        results = model.train_regime_models(
+            tickers, period="2y", min_regime_samples=10
+        )
+
+    assert isinstance(results, dict)
+    # At least one regime should have been trained
+    assert len(results) >= 1
+    for regime, metrics in results.items():
+        assert "train_ic" in metrics
+        assert "test_ic" in metrics
+        assert isinstance(metrics["train_ic"], float)
+        assert metrics["n_train"] > 0
+
+    os.unlink(regime_tmp)
+    os.unlink(base_tmp)
