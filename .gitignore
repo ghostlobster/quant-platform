@@ -54,3 +54,4 @@ coverage.xml
 coverage-integration.xml
 htmlcov/
 .pytest_cache/
+.coverage
