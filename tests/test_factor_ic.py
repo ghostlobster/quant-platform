@@ -1,11 +1,9 @@
 """Tests for analysis/factor_ic.py — Information Coefficient analysis."""
 import os
 import sys
-from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
-import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
@@ -16,7 +14,6 @@ from analysis.factor_ic import (
     compute_ic,
     compute_ic_decay,
 )
-
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 

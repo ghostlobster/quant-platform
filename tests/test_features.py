@@ -9,7 +9,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from data.features import build_feature_matrix, _FEATURE_COLS, _FWD_COLS, _MIN_ROWS
+from data.features import _FEATURE_COLS, _FWD_COLS, build_feature_matrix
 
 
 def _make_ohlcv(n: int = 200, seed: int = 42, start: str = "2022-01-01") -> pd.DataFrame:

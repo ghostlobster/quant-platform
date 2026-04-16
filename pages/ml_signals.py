@@ -14,9 +14,9 @@ that a missing package does not crash the entire Streamlit app at startup.
 """
 from __future__ import annotations
 
-import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
+import streamlit as st
 
 # Reuse the existing 32-ticker universe defined in the screener
 from screener.screener import TICKERS
@@ -56,7 +56,7 @@ def render() -> None:
     if do_train:
         with st.spinner("Building feature matrix and training LightGBM alpha model…"):
             try:
-                from strategies.ml_signal import MLSignal, _LGBM_AVAILABLE
+                from strategies.ml_signal import _LGBM_AVAILABLE, MLSignal
                 if not _LGBM_AVAILABLE:
                     st.error(
                         "lightgbm is not installed. "
@@ -125,8 +125,8 @@ def render() -> None:
     if st.button("Compute IC Table", key="ml_ic_btn"):
         with st.spinner("Computing IC statistics — this may take a moment…"):
             try:
-                from data.features import build_feature_matrix
                 from analysis.factor_ic import compute_ic
+                from data.features import build_feature_matrix
                 fm = build_feature_matrix(selected_tickers, period=period)
                 if fm.empty:
                     st.warning("Feature matrix is empty — check tickers and period.")

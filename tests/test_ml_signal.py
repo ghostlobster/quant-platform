@@ -2,7 +2,7 @@
 import os
 import sys
 import tempfile
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
@@ -10,9 +10,8 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from strategies.ml_signal import MLSignal, _LGBM_AVAILABLE, _FEATURE_COLS, _TARGET_COL
-from backtester.walk_forward import purged_walk_forward, WalkForwardResult
-
+from backtester.walk_forward import WalkForwardResult, purged_walk_forward
+from strategies.ml_signal import _FEATURE_COLS, _LGBM_AVAILABLE, _TARGET_COL, MLSignal
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 

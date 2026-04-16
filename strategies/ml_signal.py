@@ -25,7 +25,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from data.features import build_feature_matrix, _FEATURE_COLS
+from data.features import _FEATURE_COLS, build_feature_matrix
 from utils.logger import get_logger
 
 log = get_logger(__name__)
