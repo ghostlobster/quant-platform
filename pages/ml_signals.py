@@ -99,6 +99,110 @@ def render() -> None:
 
     st.divider()
 
+    # ── Backtest ML Signal ────────────────────────────────────────────────────
+    st.markdown("#### Backtest ML Signal")
+    st.caption(
+        "Runs the trained ML model across all historical dates for a single ticker "
+        "(using the full universe for cross-sectional z-scoring) and backtests the "
+        "resulting long/flat signal through the event-driven engine."
+    )
+
+    if len(selected_tickers) >= 1:
+        focus_ticker = st.selectbox(
+            "Focus ticker for backtest",
+            options=selected_tickers,
+            key="ml_backtest_ticker",
+        )
+        if st.button("Run ML Backtest", key="ml_backtest_btn"):
+            with st.spinner(f"Building signals for {focus_ticker} and running backtest…"):
+                try:
+                    from data.features import _FEATURE_COLS, build_feature_matrix
+                    from strategies.ml_signal import MLSignal
+                    from backtester.engine import build_equity_chart, run_signal_backtest
+                    from data.fetcher import fetch_ohlcv
+
+                    model = st.session_state.get("ml_model_instance") or MLSignal()
+                    if model._model is None:
+                        st.warning("No trained model found. Click **Train / Retrain Model** first.")
+                    else:
+                        fm = build_feature_matrix(selected_tickers, period=period)
+                        if fm.empty:
+                            st.error("Feature matrix is empty — check tickers and period.")
+                        else:
+                            feature_cols = [c for c in _FEATURE_COLS if c in fm.columns]
+                            try:
+                                ticker_fm = fm.xs(focus_ticker, level="ticker")[feature_cols].fillna(0.0)
+                            except KeyError:
+                                st.error(f"{focus_ticker} not found in feature matrix.")
+                                ticker_fm = None
+
+                            if ticker_fm is not None and not ticker_fm.empty:
+                                raw_preds = model._model.predict(ticker_fm.values)
+                                signals = pd.Series(raw_preds, index=ticker_fm.index)
+
+                                ohlcv = fetch_ohlcv(focus_ticker, period)
+                                if ohlcv is None or ohlcv.empty:
+                                    st.error(f"Could not fetch OHLCV data for {focus_ticker}.")
+                                else:
+                                    bt_result = run_signal_backtest(
+                                        ohlcv, signals,
+                                        strategy_name="ML Signal",
+                                        ticker=focus_ticker,
+                                    )
+                                    st.session_state["ml_backtest_result"] = bt_result
+
+                except Exception as exc:
+                    st.error(f"Backtest failed: {exc}")
+
+    if "ml_backtest_result" in st.session_state:
+        r = st.session_state["ml_backtest_result"]
+        bc1, bc2, bc3, bc4 = st.columns(4)
+        bc1.metric("Total Return", f"{r.total_return_pct:.2f}%")
+        bc2.metric("Sharpe", f"{r.sharpe_ratio:.3f}")
+        bc3.metric("Max DD", f"{r.max_drawdown_pct:.2f}%")
+        bc4.metric("Trades", str(r.num_trades))
+        from backtester.engine import build_equity_chart
+        st.plotly_chart(build_equity_chart(r), use_container_width=True)
+
+    st.divider()
+
+    # ── Execute ML Signals ────────────────────────────────────────────────────
+    st.markdown("#### Execute ML Signals (Paper Trading)")
+    st.caption(
+        "Translates current alpha scores into paper trading orders: "
+        "long top-scoring tickers, exit bearish positions."
+    )
+    exec_threshold = st.slider(
+        "Score threshold", min_value=0.1, max_value=0.9, value=0.3, step=0.05,
+        key="ml_exec_threshold",
+        help="Minimum |score| required to act. Longs: score > threshold. Exits: score < −threshold.",
+    )
+    exec_max_pos = st.number_input(
+        "Max long positions", min_value=1, max_value=20, value=5, step=1,
+        key="ml_exec_max_pos",
+    )
+
+    if st.button("Execute Signals (Paper)", key="ml_exec_btn", type="secondary"):
+        if "ml_scores" not in st.session_state:
+            st.warning("Compute Alpha Scores first.")
+        else:
+            with st.spinner("Submitting paper orders…"):
+                try:
+                    from strategies.ml_execution import execute_ml_signals
+                    actions = execute_ml_signals(
+                        st.session_state["ml_scores"],
+                        threshold=exec_threshold,
+                        max_positions=int(exec_max_pos),
+                    )
+                    if actions:
+                        st.success(f"Executed {len(actions)} order(s): {', '.join(actions)}")
+                    else:
+                        st.info("No orders to execute — scores within neutral band or no changes needed.")
+                except Exception as exc:
+                    st.error(f"Execution failed: {exc}")
+
+    st.divider()
+
     # ── Feature Importance ────────────────────────────────────────────────────
     st.markdown("#### Feature Importance (Top 20)")
     with st.spinner("Loading feature importances…"):

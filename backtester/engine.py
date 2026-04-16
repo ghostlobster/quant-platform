@@ -394,6 +394,72 @@ def run_backtest(
     )
 
 
+def run_signal_backtest(
+    df: pd.DataFrame,
+    signals: pd.Series,
+    strategy_name: str = "ml_signal",
+    ticker: str = "UNKNOWN",
+) -> BacktestResult:
+    """
+    Run a backtest using an externally-computed signal series.
+
+    Accepts any signal series with numeric values (e.g. from MLSignal.predict()
+    applied to each date, or any custom alpha signal).  Values > 0 are treated as
+    long (+1); values ≤ 0 are treated as flat (−1).
+
+    Parameters
+    ----------
+    df            : OHLCV DataFrame from data.fetcher.fetch_ohlcv
+    signals       : Series of signal scores indexed by date.
+                    Aligned to df.index via reindex; missing dates filled with 0.
+    strategy_name : label stored in BacktestResult.strategy (default "ml_signal")
+    ticker        : symbol string for result labelling
+
+    Returns
+    -------
+    BacktestResult — same structure as run_backtest()
+    """
+    data = df.copy()
+
+    if len(data) < 2:
+        raise ValueError("Not enough data to run signal backtest.")
+
+    # Align signals to the OHLCV index; fill gaps with 0 (flat)
+    aligned = signals.reindex(data.index).fillna(0.0)
+    # Normalise to {+1, -1}: positive → long, non-positive → flat/out
+    normalised = pd.Series(
+        np.where(aligned.values > 0, 1, -1),
+        index=data.index,
+        dtype=int,
+    )
+
+    # Reuse the continuous (sma_crossover-style) core loop
+    trades, equity_df, stop_losses = _run(data, normalised, "sma_crossover")
+    m = _metrics(trades, equity_df)
+
+    close = data["Close"]
+    bh_ret = (float(close.iloc[-1]) / float(close.iloc[0]) - 1) * 100
+
+    return BacktestResult(
+        strategy=strategy_name,
+        ticker=ticker.upper(),
+        start_date=data.index[0],
+        end_date=data.index[-1],
+        total_return_pct=m["total_return_pct"],
+        buy_hold_return_pct=round(bh_ret, 2),
+        sharpe_ratio=m["sharpe_ratio"],
+        sortino_ratio=m["sortino_ratio"],
+        calmar_ratio=m["calmar_ratio"],
+        max_drawdown_pct=m["max_drawdown_pct"],
+        win_rate_pct=m["win_rate_pct"],
+        num_trades=m["num_trades"],
+        avg_trade_pct=m["avg_trade_pct"],
+        stop_losses_triggered=stop_losses,
+        trades=trades,
+        equity_curve=equity_df,
+    )
+
+
 # ── Chart builder ─────────────────────────────────────────────────────────────
 
 def build_equity_chart(result: BacktestResult) -> go.Figure:
