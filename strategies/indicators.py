@@ -8,7 +8,13 @@ Uses the `ta` library (https://github.com/bukosabino/ta) which wraps pandas
 and requires no compiled extensions.
 """
 import pandas as pd
-import ta
+
+try:
+    import ta
+    _TA_AVAILABLE = True
+except ImportError:  # pragma: no cover
+    ta = None  # type: ignore[assignment]
+    _TA_AVAILABLE = False
 
 # ── Individual indicator functions ────────────────────────────────────────────
 

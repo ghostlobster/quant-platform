@@ -117,6 +117,7 @@ import pages.alerts as pg_alerts  # noqa: E402
 import pages.backtest as pg_backtest  # noqa: E402
 import pages.efficient_frontier as pg_ef  # noqa: E402
 import pages.journal_tab as pg_journal  # noqa: E402
+import pages.ml_signals as pg_ml_signals  # noqa: E402
 import pages.portfolio as pg_portfolio  # noqa: E402
 import pages.screener as pg_screener  # noqa: E402
 import pages.shared as pg_shared  # noqa: E402
@@ -597,3 +598,76 @@ class TestPagesAlerts:
              patch("pages.alerts.fetch_ohlcv", return_value=_ohlcv()), \
              patch("pages.alerts.compute_rsi", return_value=55.0):
             pg_alerts.render()
+
+# ── pages/ml_signals.py ───────────────────────────────────────────────────────
+
+class TestPagesMlSignals:
+    """Smoke tests for the ML Alpha Signals page."""
+
+    def _mock_ml_signal(self):
+        mock = MagicMock()
+        mock.feature_importance.return_value = pd.DataFrame(
+            {"feature": ["ret_5d", "vol_ratio_20d"], "importance": [120, 80]}
+        )
+        mock.predict.return_value = {"AAPL": 0.4, "MSFT": -0.2}
+        mock.train.return_value = {
+            "train_ic": 0.05, "test_ic": 0.03,
+            "train_icir": 0.6, "test_icir": 0.4,
+            "n_train_samples": 800, "n_test_samples": 200,
+        }
+        return mock
+
+    def test_render_default_no_buttons(self):
+        """Page renders without any button clicks (default state)."""
+        _reset_session()
+        with patch("strategies.ml_signal.MLSignal", return_value=self._mock_ml_signal()):
+            pg_ml_signals.render()
+
+    def test_render_with_cached_scores(self):
+        """Page renders alpha chart when ml_scores is already in session_state."""
+        _reset_session()
+        _ST.session_state["ml_scores"] = {"AAPL": 0.5, "MSFT": -0.3, "GOOGL": 0.1}
+        with patch("strategies.ml_signal.MLSignal", return_value=self._mock_ml_signal()):
+            pg_ml_signals.render()
+
+    def test_render_with_cached_train_metrics(self):
+        """Page renders metric tiles when ml_train_metrics is in session_state."""
+        _reset_session()
+        _ST.session_state["ml_train_metrics"] = {
+            "train_ic": 0.06, "test_ic": 0.04,
+            "train_icir": 0.7, "test_icir": 0.5,
+        }
+        with patch("strategies.ml_signal.MLSignal", return_value=self._mock_ml_signal()):
+            pg_ml_signals.render()
+
+    def test_render_compute_scores_button(self):
+        """Cover predict path when Compute Alpha Scores button is clicked."""
+        _reset_session()
+        def _btn(label, **kw):
+            return kw.get("key") == "ml_predict_btn"
+        _ST.button.side_effect = _btn
+        mock_model = self._mock_ml_signal()
+        with patch("strategies.ml_signal.MLSignal", return_value=mock_model):
+            pg_ml_signals.render()
+        _ST.button.side_effect = None
+        _ST.button.return_value = False
+
+    def test_render_empty_tickers(self):
+        """Page shows warning and returns early when no tickers are selected."""
+        _reset_session()
+        _ST.multiselect.side_effect = lambda *a, **kw: []
+        with patch("strategies.ml_signal.MLSignal", return_value=self._mock_ml_signal()):
+            pg_ml_signals.render()
+        _ST.multiselect.side_effect = (
+            lambda label, options=(), *a, **kw: list(kw.get("default", list(options)))
+        )
+
+    def test_render_no_trained_model(self):
+        """Page shows info message when feature_importance returns empty DataFrame."""
+        _reset_session()
+        mock_model = self._mock_ml_signal()
+        mock_model.feature_importance.return_value = pd.DataFrame(
+            columns=["feature", "importance"]
+        )
+        with patch("strategies.ml_signal.MLSignal", return_value=mock_model):
+            pg_ml_signals.render()

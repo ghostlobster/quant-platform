@@ -196,6 +196,140 @@ def walk_forward_parallel(
     )
 
 
+def purged_walk_forward(
+    strategy_fn,
+    feature_matrix: pd.DataFrame,
+    n_splits: int = 5,
+    embargo_pct: float = 0.01,
+) -> WalkForwardResult:
+    """
+    Purged walk-forward cross-validation with an embargo gap.
+
+    Prevents label leakage from overlapping forward-return labels by inserting
+    an embargo gap between the end of each training period and the start of
+    the corresponding test period.
+
+    Parameters
+    ----------
+    strategy_fn    : callable(segment: pd.DataFrame) -> pd.Series
+                     Accepts a MultiIndex (date, ticker) feature matrix segment
+                     and returns a pd.Series of daily portfolio returns indexed
+                     by date.
+    feature_matrix : MultiIndex (date, ticker) DataFrame from build_feature_matrix
+    n_splits       : number of train/test folds (default: 5)
+    embargo_pct    : fraction of total date count used as the embargo gap
+                     (default: 0.01 = 1% of total bars ≈ ~5 trading days on 2y data)
+
+    Returns
+    -------
+    WalkForwardResult (same structure as walk_forward())
+
+    Notes
+    -----
+    For fold k (0-indexed) of n_splits:
+        train_end  = dates[int(total * (k + 1) / n_splits)]
+        gap_end    = train_end + embargo_bars
+        test_start = dates[gap_end]
+        test_end   = dates[int(total * (k + 2) / n_splits)] or last date
+    Fold k=0 uses the first (1/n_splits) of dates as training.
+    """
+    if feature_matrix.empty:
+        logger.warning("purged_walk_forward: empty feature matrix")
+        return WalkForwardResult()
+
+    all_dates = sorted(feature_matrix.index.get_level_values(0).unique())
+    total = len(all_dates)
+    embargo_bars = max(1, int(embargo_pct * total))
+
+    results: list[BacktestResult] = []
+
+    for k in range(n_splits - 1):
+        train_end_idx = int(total * (k + 1) / n_splits)
+        test_start_idx = min(train_end_idx + embargo_bars, total - 1)
+        test_end_idx = min(int(total * (k + 2) / n_splits), total)
+
+        if test_start_idx >= test_end_idx:
+            logger.warning("purged_walk_forward: fold %d has empty test window — skipped", k)
+            continue
+
+        train_dates = set(all_dates[:train_end_idx])
+        test_dates = set(all_dates[test_start_idx:test_end_idx])
+
+        train_seg = feature_matrix[feature_matrix.index.get_level_values(0).isin(train_dates)]
+        test_seg = feature_matrix[feature_matrix.index.get_level_values(0).isin(test_dates)]
+
+        if train_seg.empty or test_seg.empty:
+            continue
+
+        try:
+            # strategy_fn receives (train_seg, test_seg); returns a returns Series
+            daily_returns = strategy_fn(train_seg, test_seg)
+            if daily_returns is None or daily_returns.empty:
+                continue
+
+            # Compute backtest-compatible metrics from the returns Series
+            rets = daily_returns.dropna()
+            if len(rets) < 2:
+                continue
+
+            total_return = float((1 + rets).prod() - 1)
+            ann_vol = float(rets.std() * np.sqrt(252))
+            sharpe = float(rets.mean() / rets.std() * np.sqrt(252)) if rets.std() > 0 else 0.0
+
+            # Sortino: downside deviation
+            neg = rets[rets < 0]
+            downside_std = float(neg.std() * np.sqrt(252)) if len(neg) > 1 else ann_vol
+            sortino = float(rets.mean() * 252 / downside_std) if downside_std > 0 else 0.0
+
+            # Max drawdown from equity curve
+            equity = (1 + rets).cumprod()
+            roll_max = equity.cummax()
+            drawdown = (equity - roll_max) / roll_max
+            max_dd = float(drawdown.min())
+
+            calmar = float(total_return / abs(max_dd)) if max_dd != 0 else 0.0
+
+            # Wrap in a BacktestResult for compatibility with WalkForwardResult
+            result = BacktestResult(
+                ticker="portfolio",
+                strategy="purged_wf",
+                start_date=rets.index[0],
+                end_date=rets.index[-1],
+                total_return_pct=total_return,
+                buy_hold_return_pct=0.0,
+                sharpe_ratio=sharpe,
+                sortino_ratio=sortino,
+                calmar_ratio=calmar,
+                max_drawdown_pct=max_dd,
+                num_trades=0,
+                win_rate_pct=float((rets > 0).mean() * 100),
+                avg_trade_pct=float(rets.mean()),
+                stop_losses_triggered=0,
+            )
+            results.append(result)
+
+        except Exception as exc:
+            logger.warning("purged_walk_forward: fold %d failed — skipped: %s", k, exc)
+
+    if not results:
+        return WalkForwardResult()
+
+    returns = [r.total_return_pct for r in results]
+    sharpes = [r.sharpe_ratio for r in results]
+    sortinos = [r.sortino_ratio for r in results]
+    drawdowns = [r.max_drawdown_pct for r in results]
+
+    return WalkForwardResult(
+        windows=results,
+        avg_return=float(np.mean(returns)),
+        avg_sharpe=float(np.mean(sharpes)),
+        avg_sortino=float(np.mean(sortinos)),
+        avg_max_drawdown=float(np.mean(drawdowns)),
+        total_trades=0,
+        consistency_score=float(np.mean([1 if r > 0 else 0 for r in returns])),
+    )
+
+
 def build_walk_forward_chart(wf_result: WalkForwardResult):
     """Bar chart of per-window returns."""
     import plotly.graph_objects as go
