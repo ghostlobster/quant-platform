@@ -86,6 +86,9 @@ def render() -> None:
 
         st.plotly_chart(build_equity_chart(result), use_container_width=True)
 
+        # ── Deflated Sharpe guard (AFML Ch 11) ─────────────────────────────────
+        _render_deflated_sharpe_panel(result)
+
         with st.expander(f"Trade Log ({result.num_trades} trades)"):
             trade_df = build_trade_log_df(result)
             if trade_df.empty:
@@ -104,3 +107,56 @@ def render() -> None:
                     use_container_width=True, hide_index=True,
                 )
                 st.caption(f"Average trade return: {trade_df['Return (%)'].mean():+.2f}%")
+
+
+def _render_deflated_sharpe_panel(result) -> None:
+    """AFML Ch 11 — Deflated Sharpe probability + interpretation.
+
+    Derives daily returns from the equity curve, then computes DSR using
+    a user-supplied ``n_trials`` (defaults to 1 — honest single-backtest
+    case).  Bumping ``n_trials`` is appropriate once the user has tried
+    multiple parameter variants.
+    """
+    from analysis.deflated_sharpe import deflated_sharpe, deflated_sharpe_warning
+
+    equity = getattr(result, "equity_curve", None)
+    if equity is None or equity.empty or "Equity" not in equity.columns:
+        return
+
+    daily_ret = equity["Equity"].pct_change().dropna()
+    if len(daily_ret) < 5:
+        return
+
+    n_trials = int(st.number_input(
+        "# Strategy variants tried (affects DSR)",
+        min_value=1, max_value=10_000, value=1, step=1,
+        key="bt_dsr_trials",
+        help=(
+            "Set to the number of strategies / parameter combinations "
+            "tested to produce this backtest.  DSR discounts Sharpe for "
+            "multiple-testing selection bias (AFML Ch 11)."
+        ),
+    ))
+
+    skew = float(daily_ret.skew()) if len(daily_ret) > 2 else 0.0
+    kurt = float(daily_ret.kurt()) if len(daily_ret) > 3 else 0.0
+
+    dsr = deflated_sharpe(
+        sharpe=float(result.sharpe_ratio),
+        n_trials=n_trials,
+        skew=skew,
+        kurt=kurt,
+        num_obs=len(daily_ret),
+    )
+
+    dc1, dc2, dc3, dc4 = st.columns(4)
+    dc1.metric("DSR P(Sharpe>0)", f"{dsr:.3f}")
+    dc2.metric("Observed Sharpe", f"{result.sharpe_ratio:.3f}")
+    dc3.metric("Skewness",        f"{skew:+.2f}")
+    dc4.metric("Excess Kurtosis", f"{kurt:+.2f}")
+
+    warning = deflated_sharpe_warning(dsr)
+    if dsr < 0.05:
+        st.warning(warning)
+    else:
+        st.caption(warning)
