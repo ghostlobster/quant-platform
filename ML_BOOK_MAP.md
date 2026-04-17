@@ -83,7 +83,7 @@ graph LR
 
 | Chapter                                      | Topic                          | Status | Module(s)                                                       |
 |----------------------------------------------|--------------------------------|:------:|-----------------------------------------------------------------|
-| 2 — Financial Data Structures                | tick/volume/dollar bars        |   ⏳   | _planned_ — see issue "Dollar/volume bars"                      |
+| 2 — Financial Data Structures                | tick/volume/dollar bars        |   ✅   | `data/bars.py` (dollar_bars, volume_bars, tick_bars)            |
 | 3 — Labeling                                 | triple-barrier, meta-labeling  |   ✅   | `analysis/triple_barrier.py`, `strategies/meta_label.py`        |
 | 4 — Sample Weights                           | concurrency-based weighting    |   ✅   | `analysis/sample_weights.py` (num_co_events, sample_uniqueness, sequential_bootstrap) |
 | 5 — Fractionally Differentiated Features     | stationarity vs memory         |   ✅   | `data/frac_diff.py`                                             |
