@@ -2,6 +2,8 @@
 pages/portfolio.py — Paper trading portfolio tab.
 """
 import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
 import streamlit as st
 
 from broker.paper_trader import (
@@ -17,7 +19,7 @@ from broker.paper_trader import (
 from broker.paper_trader import (
     sell as pt_sell,
 )
-from data.fetcher import fetch_latest_price
+from data.fetcher import fetch_latest_price, fetch_ohlcv
 
 
 def render() -> None:
@@ -231,6 +233,16 @@ def render() -> None:
                     rc7.metric("Worst Day",  f"{rm.worst_day_pct:.2f}%")
                     rc8.metric("Best Day",   f"{rm.best_day_pct:.2f}%")
 
+    # ── Risk Factors (PCA / k-means) ──────────────────────────────────────────
+    st.divider()
+    with st.expander("🧬 Risk Factors (PCA / k-means)", expanded=False):
+        st.caption(
+            "Decompose a ticker universe into latent statistical factors (PCA) "
+            "and group assets by correlation distance (k-means). "
+            "Jansen, *ML for Algorithmic Trading* Ch 13."
+        )
+        _render_risk_factors()
+
     # ── Danger zone: reset ────────────────────────────────────────────────────
     st.divider()
     with st.expander("⚠️ Danger Zone"):
@@ -242,3 +254,141 @@ def render() -> None:
             reset_account()
             st.success("Account reset. Starting fresh.")
             st.rerun()
+
+
+# ── Risk Factor helpers ──────────────────────────────────────────────────────
+
+@st.cache_data(ttl=600, show_spinner=False)
+def _fetch_return_matrix(tickers_key: str, period: str) -> pd.DataFrame:
+    """Fetch daily-return frame for the comma-separated ticker string."""
+    cols: dict[str, pd.Series] = {}
+    for ticker in tickers_key.split(","):
+        t = ticker.strip().upper()
+        if not t:
+            continue
+        try:
+            df = fetch_ohlcv(t, period)
+            if df is not None and not df.empty:
+                cols[t] = df["Close"].astype(float)
+        except Exception:
+            pass
+    if not cols:
+        return pd.DataFrame()
+    prices = pd.DataFrame(cols).dropna(how="all")
+    return prices.pct_change().dropna(how="all")
+
+
+def _render_risk_factors() -> None:
+    """PCA scree + cluster heatmap + downloadable assignments."""
+    from analysis.unsupervised import (
+        cluster_assets,
+        cluster_members,
+        pca_risk_factors,
+    )
+
+    rf_col1, rf_col2, rf_col3 = st.columns([3, 1, 1])
+    with rf_col1:
+        raw_tickers = st.text_input(
+            "Tickers (comma-separated)",
+            value="AAPL, MSFT, GOOG, AMZN, META, NVDA, JPM, XOM",
+            key="rf_tickers",
+            help="Enter 3+ tickers to run PCA + k-means on their daily returns.",
+        )
+    with rf_col2:
+        rf_period = st.selectbox(
+            "History",
+            options=["6mo", "1y", "2y", "5y"],
+            index=2,
+            key="rf_period",
+        )
+    with rf_col3:
+        rf_k = int(st.number_input(
+            "Clusters (k)",
+            min_value=2, max_value=12, value=4, step=1,
+            key="rf_k",
+            help="k-means cluster count. Capped at the number of tickers.",
+        ))
+
+    tickers = [t.strip().upper() for t in raw_tickers.split(",") if t.strip()]
+    if len(tickers) < 3:
+        st.info("Enter at least 3 tickers to run the decomposition.")
+        return
+
+    tickers_key = ",".join(sorted(set(tickers)))
+    with st.spinner("Fetching daily returns…"):
+        returns = _fetch_return_matrix(tickers_key, rf_period)
+
+    if returns.empty or returns.shape[1] < 2:
+        st.error("Could not build a return matrix from the selected tickers.")
+        return
+
+    missing = [t for t in tickers if t not in returns.columns]
+    if missing:
+        st.warning(f"No data for: {', '.join(missing)}. Excluded.")
+
+    # ── PCA scree ─────────────────────────────────────────────────────────────
+    n_components = min(len(returns.columns), 6)
+    factors = pca_risk_factors(returns, n_components=n_components)
+    if factors.explained_variance.empty:
+        st.info("Not enough observations for PCA (need ≥ 20 rows).")
+        return
+
+    scree_fig = go.Figure(go.Bar(
+        x=list(factors.explained_variance.index),
+        y=(factors.explained_variance.values * 100).tolist(),
+        marker_color="#3498db",
+        text=[f"{v * 100:.1f}%" for v in factors.explained_variance.values],
+        textposition="outside",
+    ))
+    scree_fig.update_layout(
+        title="PCA Scree — Variance Explained per Component",
+        xaxis_title="Component",
+        yaxis_title="Variance Explained (%)",
+        height=320,
+        margin=dict(l=60, r=40, t=50, b=40),
+    )
+    st.plotly_chart(scree_fig, use_container_width=True)
+
+    # ── Loadings heatmap (tickers × components) ───────────────────────────────
+    loadings = factors.loadings
+    load_fig = go.Figure(data=go.Heatmap(
+        z=loadings.values,
+        x=list(loadings.columns),
+        y=list(loadings.index),
+        colorscale="RdBu",
+        zmid=0,
+        text=[[f"{v:+.2f}" for v in row] for row in loadings.values],
+        texttemplate="%{text}",
+        showscale=True,
+    ))
+    load_fig.update_layout(
+        title="PCA Factor Loadings (ticker × component)",
+        height=max(320, len(loadings.index) * 28),
+        margin=dict(l=80, r=40, t=50, b=40),
+    )
+    st.plotly_chart(load_fig, use_container_width=True)
+
+    # ── k-means cluster assignments ───────────────────────────────────────────
+    labels = cluster_assets(returns, n_clusters=rf_k)
+    if labels.empty:
+        st.info("Clustering skipped — not enough data.")
+        return
+
+    members = cluster_members(labels)
+    cluster_rows = [
+        {"Cluster": cid, "N": len(tickers_in_cluster),
+         "Tickers": ", ".join(tickers_in_cluster)}
+        for cid, tickers_in_cluster in members.items()
+    ]
+    cluster_df = pd.DataFrame(cluster_rows)
+    st.markdown("**k-means clusters (correlation distance)**")
+    st.dataframe(cluster_df, use_container_width=True, hide_index=True)
+
+    csv_df = pd.DataFrame({"ticker": labels.index, "cluster": labels.values})
+    st.download_button(
+        label="Download cluster assignments (CSV)",
+        data=csv_df.to_csv(index=False).encode("utf-8"),
+        file_name="risk_factor_clusters.csv",
+        mime="text/csv",
+        key="rf_download",
+    )
