@@ -5,6 +5,7 @@ import pandas as pd
 import streamlit as st
 
 from data.fetcher import fetch_latest_price, fetch_ohlcv
+from risk.hrp import get_hrp_portfolio
 from risk.markowitz import (
     build_efficient_frontier_chart,
     get_max_sharpe_portfolio,
@@ -121,8 +122,11 @@ def render() -> None:
         st.error("Optimisation failed — not enough data.")
         return
 
+    with st.spinner("Computing Hierarchical Risk Parity weights…"):
+        hrp = get_hrp_portfolio(price_data, risk_free_rate=risk_free)
+
     st.subheader("Optimal Portfolios")
-    oc1, oc2 = st.columns(2)
+    oc1, oc2, oc3 = st.columns(3)
 
     with oc1:
         st.markdown("**Max Sharpe Ratio**")
@@ -154,13 +158,42 @@ def render() -> None:
             )
             st.dataframe(minvol_df, use_container_width=True, hide_index=True)
 
+    with oc3:
+        st.markdown("**Hierarchical Risk Parity**")
+        st.caption("AFML Ch 16 · no matrix inversion")
+        if hrp is None:
+            st.info("HRP unavailable for this universe.")
+        else:
+            hp1, hp2, hp3 = st.columns(3)
+            hp1.metric("Expected Return", f"{hrp.expected_return * 100:.1f}%")
+            hp2.metric("Volatility",      f"{hrp.expected_volatility * 100:.1f}%")
+            hp3.metric("Sharpe Ratio",    f"{hrp.sharpe_ratio:.2f}")
+            hrp_df = pd.DataFrame(
+                [{"Ticker": k, "Allocation %": v * 100}
+                 for k, v in sorted(hrp.weights.items(), key=lambda x: -x[1])]
+            )
+            st.dataframe(
+                hrp_df.style.bar(
+                    subset=["Allocation %"], color="#6c5ce7"
+                ).format({"Allocation %": "{:.1f}%"}),
+                use_container_width=True, hide_index=True,
+            )
+
     # ── Rebalancer ────────────────────────────────────────────────────────────
     st.divider()
     st.subheader("⚖️ Portfolio Rebalancer")
     st.caption(
         "Enter your current holdings to see what trades would move you to the "
-        "max-Sharpe-ratio allocation."
+        "selected target allocation."
     )
+
+    target_options: dict[str, dict] = {
+        "Max Sharpe": max_sharpe.weights,
+    }
+    if min_vol is not None:
+        target_options["Min Volatility"] = min_vol.weights
+    if hrp is not None:
+        target_options["Hierarchical Risk Parity"] = hrp.weights
 
     rc1, rc2 = st.columns([2, 1])
     with rc1:
@@ -171,6 +204,12 @@ def render() -> None:
             help="Enter market value in dollars for each position you currently hold.",
         )
     with rc2:
+        target_choice = st.selectbox(
+            "Target allocation",
+            options=list(target_options.keys()),
+            index=0,
+            help="Pick which optimal portfolio to rebalance towards.",
+        )
         total_equity = st.number_input(
             "Total equity ($)",
             min_value=1_000.0,
@@ -192,9 +231,10 @@ def render() -> None:
 
     if run_rebalance:
         current_positions = _parse_holdings(holdings_text)
+        target_weights = target_options[target_choice]
 
         # Fetch current prices for all tickers in the optimal portfolio
-        price_tickers = set(max_sharpe.weights) | set(current_positions)
+        price_tickers = set(target_weights) | set(current_positions)
         prices_key = ",".join(sorted(price_tickers))
         with st.spinner("Fetching current prices…"):
             current_prices = _fetch_current_prices(prices_key)
@@ -208,7 +248,7 @@ def render() -> None:
 
         trades = compute_rebalance_trades(
             current_positions=current_positions,
-            target_weights=max_sharpe.weights,
+            target_weights=target_weights,
             total_equity=total_equity,
             current_prices=current_prices,
             min_trade_value=min_trade,
