@@ -80,13 +80,18 @@ def render() -> None:
         pt_sl = (float(pt_val), float(sl_val))
 
     # ── Train / Retrain ───────────────────────────────────────────────────────
-    col_lgbm, col_regime, col_ridge, col_tune = st.columns(4)
+    col_lgbm, col_regime, col_ridge, col_bayes, col_tune = st.columns(5)
     with col_lgbm:
         do_train = st.button("Train LGBM Baseline", type="primary", key="ml_train_btn")
     with col_regime:
         do_train_regime = st.button("Train Regime Models", key="ml_train_regime_btn")
     with col_ridge:
         do_train_ridge = st.button("Train Ridge Model", key="ml_train_ridge_btn")
+    with col_bayes:
+        do_train_bayes = st.button(
+            "Train Bayesian Model", key="ml_train_bayes_btn",
+            help="BayesianRidge — posterior-std exposed for Kelly sizing (ML4T Ch 10)."
+        )
     with col_tune:
         tune_trials = int(st.number_input(
             "Tune trials", min_value=5, max_value=100, value=20, step=5,
@@ -161,6 +166,24 @@ def render() -> None:
             except Exception as exc:
                 st.error(f"Ridge training failed: {exc}")
 
+    if do_train_bayes:
+        with st.spinner("Training BayesianRidge alpha model…"):
+            try:
+                from strategies.bayesian_signal import (
+                    _SKLEARN_AVAILABLE,
+                    BayesianSignal,
+                )
+                if not _SKLEARN_AVAILABLE:
+                    st.error("scikit-learn is not installed.")
+                else:
+                    bayes_model = BayesianSignal()
+                    bayes_metrics = bayes_model.train(selected_tickers, period=period)
+                    st.session_state["bayes_model_instance"] = bayes_model
+                    st.session_state["bayes_train_metrics"] = bayes_metrics
+                    st.success("Bayesian model trained successfully.")
+            except Exception as exc:
+                st.error(f"Bayesian training failed: {exc}")
+
     if do_tune:
         with st.spinner(f"Running Optuna TPE search ({tune_trials} trials)…"):
             try:
@@ -224,6 +247,16 @@ def render() -> None:
         rc3.metric("Train ICIR", f"{rm.get('train_icir', 0):.3f}")
         rc4.metric("Test ICIR",  f"{rm.get('test_icir', 0):.3f}")
 
+    # ── Bayesian training metrics ─────────────────────────────────────────────
+    if "bayes_train_metrics" in st.session_state:
+        bm = st.session_state["bayes_train_metrics"]
+        st.caption("**Bayesian Ridge Metrics**")
+        bc1, bc2, bc3, bc4 = st.columns(4)
+        bc1.metric("Train IC",   f"{bm.get('train_ic', 0):.4f}")
+        bc2.metric("Test IC",    f"{bm.get('test_ic', 0):.4f}")
+        bc3.metric("Train ICIR", f"{bm.get('train_icir', 0):.3f}")
+        bc4.metric("Test ICIR",  f"{bm.get('test_icir', 0):.3f}")
+
     # ── Regime model metrics ──────────────────────────────────────────────────
     if "ml_regime_results" in st.session_state:
         rr = st.session_state["ml_regime_results"]
@@ -252,8 +285,9 @@ def render() -> None:
     )
 
     if st.button("Compute All Scores", key="ml_compute_all_btn", type="primary"):
-        with st.spinner("Scoring all three models…"):
+        with st.spinner("Scoring all models…"):
             try:
+                from strategies.bayesian_signal import BayesianSignal
                 from strategies.ensemble_signal import blend_signals
                 from strategies.linear_signal import LinearSignal
                 from strategies.ml_signal import MLSignal
@@ -268,12 +302,24 @@ def render() -> None:
                 st.session_state["ridge_model_instance"] = ridge_model
                 st.session_state["ridge_scores"] = ridge_scores
 
-                ensemble_scores = blend_signals(lgbm_scores, ridge_scores)
+                bayes_model = st.session_state.get("bayes_model_instance") or BayesianSignal()
+                bayes_scores, bayes_sigma = bayes_model.predict_with_uncertainty(
+                    selected_tickers, period="6mo",
+                )
+                st.session_state["bayes_model_instance"] = bayes_model
+                st.session_state["bayes_scores"] = bayes_scores
+                st.session_state["bayes_sigma"] = bayes_sigma
+
+                ensemble_scores = blend_signals(
+                    lgbm_scores, ridge_scores, bayes_scores,
+                )
                 st.session_state["ensemble_scores"] = ensemble_scores
             except Exception as exc:
                 st.error(f"Scoring failed: {exc}")
 
-    tab_lgbm, tab_ridge, tab_ensemble = st.tabs(["LGBM", "Ridge", "Ensemble"])
+    tab_lgbm, tab_ridge, tab_bayes, tab_ensemble = st.tabs(
+        ["LGBM", "Ridge", "Bayesian", "Ensemble"]
+    )
 
     with tab_lgbm:
         if st.button("Compute LGBM Scores", key="ml_predict_btn"):
@@ -301,17 +347,48 @@ def render() -> None:
         if "ridge_scores" in st.session_state:
             _render_alpha_chart(st.session_state["ridge_scores"])
 
+    with tab_bayes:
+        if st.button("Compute Bayesian Scores", key="bayes_predict_btn"):
+            with st.spinner("Scoring tickers with Bayesian model…"):
+                try:
+                    from strategies.bayesian_signal import BayesianSignal
+                    bayes_model = st.session_state.get("bayes_model_instance") or BayesianSignal()
+                    mean, sigma = bayes_model.predict_with_uncertainty(
+                        selected_tickers, period="6mo",
+                    )
+                    st.session_state["bayes_scores"] = mean
+                    st.session_state["bayes_sigma"] = sigma
+                except Exception as exc:
+                    st.error(f"Bayesian prediction failed: {exc}")
+        if "bayes_scores" in st.session_state:
+            _render_alpha_chart(st.session_state["bayes_scores"])
+            if "bayes_sigma" in st.session_state:
+                sigma_df = pd.DataFrame(
+                    [
+                        {"Ticker": t, "σ": s}
+                        for t, s in st.session_state["bayes_sigma"].items()
+                    ]
+                ).sort_values("σ")
+                st.caption("**Posterior predictive std (smaller = more confident)**")
+                st.dataframe(sigma_df, use_container_width=True, hide_index=True)
+
     with tab_ensemble:
         if st.button("Compute Ensemble Scores", key="ensemble_predict_btn"):
-            with st.spinner("Blending LGBM + Ridge scores…"):
+            with st.spinner("Blending all available signals…"):
                 try:
                     from strategies.ensemble_signal import blend_signals
-                    lgbm_sc = st.session_state.get("ml_scores", {})
-                    ridge_sc = st.session_state.get("ridge_scores", {})
-                    if not lgbm_sc and not ridge_sc:
-                        st.warning("Compute LGBM and/or Ridge scores first.")
+                    sources = [
+                        st.session_state.get(k, {}) for k in
+                        ("ml_scores", "ridge_scores", "bayes_scores")
+                    ]
+                    non_empty = [s for s in sources if s]
+                    if not non_empty:
+                        st.warning(
+                            "Compute at least one of LGBM / Ridge / Bayesian "
+                            "scores first."
+                        )
                     else:
-                        st.session_state["ensemble_scores"] = blend_signals(lgbm_sc, ridge_sc)
+                        st.session_state["ensemble_scores"] = blend_signals(*non_empty)
                 except Exception as exc:
                     st.error(f"Ensemble blending failed: {exc}")
         if "ensemble_scores" in st.session_state:
