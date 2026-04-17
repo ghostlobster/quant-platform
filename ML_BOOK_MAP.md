@@ -85,7 +85,7 @@ graph LR
 |----------------------------------------------|--------------------------------|:------:|-----------------------------------------------------------------|
 | 2 — Financial Data Structures                | tick/volume/dollar bars        |   ⏳   | _planned_ — see issue "Dollar/volume bars"                      |
 | 3 — Labeling                                 | triple-barrier, meta-labeling  |   ✅   | `analysis/triple_barrier.py`, `strategies/meta_label.py`        |
-| 4 — Sample Weights                           | concurrency-based weighting    |   ⏳   | _planned_ — see issue "Sample weights by uniqueness"            |
+| 4 — Sample Weights                           | concurrency-based weighting    |   ✅   | `analysis/sample_weights.py` (num_co_events, sample_uniqueness, sequential_bootstrap) |
 | 5 — Fractionally Differentiated Features     | stationarity vs memory         |   ✅   | `data/frac_diff.py`                                             |
 | 6 — Ensemble Methods                         | bagging, boosting              |   ✅   | `strategies/ensemble_signal.py`, LightGBM                       |
 | 7 — Cross-Validation in Finance              | purged + embargoed K-fold      |   ✅   | `backtester/walk_forward.py:purged_walk_forward`                |

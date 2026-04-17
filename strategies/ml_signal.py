@@ -168,6 +168,7 @@ class MLSignal:
         label_type: str = "fwd_ret",
         pt_sl: tuple[float, float] = (1.0, 1.0),
         num_days: int = 5,
+        use_sample_weights: bool = False,
     ) -> dict[str, float]:
         """
         Build feature matrix, train baseline LightGBM, evaluate on held-out
@@ -184,6 +185,12 @@ class MLSignal:
                      (classifier on the tb_bin {-1, 0, +1} label)
         pt_sl      : (profit-take, stop-loss) multipliers; triple-barrier only
         num_days   : vertical-barrier horizon in days; triple-barrier only
+        use_sample_weights :
+                     when True and label_type=="triple_barrier", compute
+                     per-event uniqueness weights (López de Prado Ch 4)
+                     from ``tb_t1`` and forward them to LightGBM's
+                     ``fit(sample_weight=...)``.  Silently ignored for
+                     the regressor ``fwd_ret`` path.
 
         Returns
         -------
@@ -257,7 +264,31 @@ class MLSignal:
             model = lgb.LGBMClassifier(**params)
         else:
             model = lgb.LGBMRegressor(**params)
-        model.fit(X_train, y_train)
+
+        fit_kwargs: dict = {}
+        if use_sample_weights and is_classifier and "tb_t1" in train_df.columns:
+            from analysis.sample_weights import weights_for_train_index
+
+            events = train_df["tb_t1"].dropna()
+            # Collapse MultiIndex to date-only event series (one entry per
+            # event start date; duplicate dates share the same t1).
+            events_by_date = (
+                events.reset_index()
+                .drop_duplicates("date")
+                .set_index("date")["tb_t1"]
+            )
+            close_idx = pd.DatetimeIndex(
+                sorted(fm.index.get_level_values("date").unique())
+            )
+            sw = weights_for_train_index(train_df.index, events_by_date, close_idx)
+            if sw.shape == (len(X_train),):
+                fit_kwargs["sample_weight"] = sw
+                log.info(
+                    "ml_signal: training with AFML Ch 4 sample weights",
+                    mean=float(sw.mean()), min=float(sw.min()), max=float(sw.max()),
+                )
+
+        model.fit(X_train, y_train, **fit_kwargs)
         self._model = model
         self._is_classifier = is_classifier
 
@@ -310,6 +341,7 @@ class MLSignal:
         label_type: str = "fwd_ret",
         pt_sl: tuple[float, float] = (1.0, 1.0),
         num_days: int = 5,
+        use_sample_weights: bool = False,
     ) -> dict[str, dict]:
         """
         Train one LGBMRegressor per market regime.
@@ -415,7 +447,26 @@ class MLSignal:
                 ic_eval_test = y_test
                 model = lgb.LGBMRegressor(**params)
 
-            model.fit(X_train, y_train)
+            fit_kwargs: dict = {}
+            if use_sample_weights and is_classifier and "tb_t1" in train_df.columns:
+                from analysis.sample_weights import weights_for_train_index
+
+                events = train_df["tb_t1"].dropna()
+                events_by_date = (
+                    events.reset_index()
+                    .drop_duplicates("date")
+                    .set_index("date")["tb_t1"]
+                )
+                close_idx = pd.DatetimeIndex(
+                    sorted(regime_fm.index.get_level_values("date").unique())
+                )
+                sw = weights_for_train_index(
+                    train_df.index, events_by_date, close_idx,
+                )
+                if sw.shape == (len(X_train),):
+                    fit_kwargs["sample_weight"] = sw
+
+            model.fit(X_train, y_train, **fit_kwargs)
 
             train_ic, train_icir = self._eval_ic(
                 model, X_train, ic_eval_train, classifier=is_classifier,

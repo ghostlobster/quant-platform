@@ -23,6 +23,8 @@ Triple-barrier targets (emitted when label_type="triple_barrier"):
     tb_bin      — label in {-1, 0, +1} (first barrier touched)
     tb_ret      — realised return from entry to first-touch
     tb_target   — volatility used to scale the barriers
+    tb_t1       — timestamp of first barrier touched (needed for AFML
+                  Ch 4 sample-uniqueness weighting)
 """
 from __future__ import annotations
 
@@ -43,7 +45,7 @@ _FEATURE_COLS = [
     "vol_ratio_20d", "vol_zscore_20d",
 ]
 _FWD_COLS = ["fwd_ret_1d", "fwd_ret_5d", "fwd_ret_10d", "fwd_ret_21d"]
-_TB_LABEL_COLS = ["tb_bin", "tb_ret", "tb_target"]
+_TB_LABEL_COLS = ["tb_bin", "tb_ret", "tb_target", "tb_t1"]
 
 
 def _single_ticker_features(
@@ -106,6 +108,7 @@ def _single_ticker_features(
             out["tb_bin"] = tb["bin"].reindex(out.index)
             out["tb_ret"] = tb["ret"].reindex(out.index)
             out["tb_target"] = tb["target"].reindex(out.index)
+            out["tb_t1"] = tb["t1"].reindex(out.index)
 
     return out
 
