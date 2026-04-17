@@ -18,6 +18,11 @@ Input features (cross-sectionally z-scored across tickers per date):
 
 Forward return targets (NOT z-scored; NaN for last n rows of each ticker):
     fwd_ret_1d, fwd_ret_5d, fwd_ret_10d, fwd_ret_21d
+
+Triple-barrier targets (emitted when label_type="triple_barrier"):
+    tb_bin      — label in {-1, 0, +1} (first barrier touched)
+    tb_ret      — realised return from entry to first-touch
+    tb_target   — volatility used to scale the barriers
 """
 from __future__ import annotations
 
@@ -38,9 +43,16 @@ _FEATURE_COLS = [
     "vol_ratio_20d", "vol_zscore_20d",
 ]
 _FWD_COLS = ["fwd_ret_1d", "fwd_ret_5d", "fwd_ret_10d", "fwd_ret_21d"]
+_TB_LABEL_COLS = ["tb_bin", "tb_ret", "tb_target"]
 
 
-def _single_ticker_features(ticker: str, period: str) -> pd.DataFrame | None:
+def _single_ticker_features(
+    ticker: str,
+    period: str,
+    label_type: str = "fwd_ret",
+    pt_sl: tuple[float, float] = (1.0, 1.0),
+    num_days: int = 5,
+) -> pd.DataFrame | None:
     """
     Compute raw (un-z-scored) features for one ticker.
 
@@ -80,30 +92,58 @@ def _single_ticker_features(ticker: str, period: str) -> pd.DataFrame | None:
     for n in (1, 5, 10, 21):
         out[f"fwd_ret_{n}d"] = close.pct_change(n).shift(-n)
 
+    # ── Triple-barrier labels (López de Prado Ch 3) ───────────────────────────
+    if label_type == "triple_barrier":
+        from analysis.triple_barrier import triple_barrier_labels
+
+        tb = triple_barrier_labels(
+            close,
+            events=close.index,
+            pt_sl=pt_sl,
+            num_days=num_days,
+        )
+        if not tb.empty:
+            out["tb_bin"] = tb["bin"].reindex(out.index)
+            out["tb_ret"] = tb["ret"].reindex(out.index)
+            out["tb_target"] = tb["target"].reindex(out.index)
+
     return out
 
 
 def build_feature_matrix(
     tickers: list[str],
     period: str = "2y",
+    label_type: str = "fwd_ret",
+    pt_sl: tuple[float, float] = (1.0, 1.0),
+    num_days: int = 5,
 ) -> pd.DataFrame:
     """
     Build a MultiIndex (date, ticker) feature matrix.
 
     Parameters
     ----------
-    tickers : list of ticker symbols to include
-    period  : yfinance-style period string passed to fetch_ohlcv
+    tickers    : list of ticker symbols to include
+    period     : yfinance-style period string passed to fetch_ohlcv
+    label_type : "fwd_ret" (default) keeps the existing forward-return
+                 targets.  "triple_barrier" additionally emits tb_bin,
+                 tb_ret, tb_target columns from
+                 analysis.triple_barrier.triple_barrier_labels.
+    pt_sl      : (profit-take, stop-loss) multipliers in daily-vol units;
+                 used only when label_type="triple_barrier".
+    num_days   : vertical-barrier horizon in days; triple-barrier only.
 
     Returns
     -------
     pd.DataFrame with MultiIndex(date, ticker).
     Input features are cross-sectionally z-scored across tickers per date.
-    Forward return columns (fwd_ret_*) are NOT z-scored.
+    Forward return and triple-barrier columns are NOT z-scored.
     """
     frames: dict[str, pd.DataFrame] = {}
     for ticker in tickers:
-        feat = _single_ticker_features(ticker, period)
+        feat = _single_ticker_features(
+            ticker, period,
+            label_type=label_type, pt_sl=pt_sl, num_days=num_days,
+        )
         if feat is not None and not feat.empty:
             frames[ticker] = feat
 

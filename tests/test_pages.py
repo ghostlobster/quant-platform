@@ -736,3 +736,143 @@ class TestPagesMlSignals:
             patch("strategies.linear_signal.LinearSignal", return_value=self._mock_linear_signal()),
         ):
             pg_ml_signals.render()
+
+    def test_render_tune_hyperparameters_button(self):
+        """Click path for the Optimize Hyperparameters button (#64)."""
+        _reset_session()
+
+        def _btn(label, **kw):
+            return kw.get("key") == "ml_tune_btn"
+
+        _ST.button.side_effect = _btn
+        tune_result = {
+            "best_params": {"learning_rate": 0.05, "num_leaves": 48},
+            "best_ic": 0.07,
+            "n_trials": 20,
+            "n_samples": 1500,
+        }
+        with (
+            patch("strategies.ml_signal.MLSignal", return_value=self._mock_ml_signal()),
+            patch("strategies.ml_tuning._OPTUNA_AVAILABLE", True),
+            patch(
+                "strategies.ml_tuning.tune_lgbm_hyperparams",
+                return_value=tune_result,
+            ) as mock_tune,
+            patch("strategies.ml_tuning.save_best_params") as mock_save,
+        ):
+            pg_ml_signals.render()
+
+        mock_tune.assert_called_once()
+        mock_save.assert_called_once()
+        assert _ST.session_state.get("ml_best_params") == tune_result["best_params"]
+        assert _ST.session_state.get("ml_tune_result") == tune_result
+        _ST.button.side_effect = None
+        _ST.button.return_value = False
+
+    def test_render_triple_barrier_label_type_passed(self):
+        """Selecting label_type=triple_barrier passes the kwargs through to train."""
+        _reset_session()
+
+        def _sel(label, options=(), *a, **kw):
+            opts = list(options)
+            if kw.get("key") == "ml_label_type":
+                return "triple_barrier"
+            return opts[kw.get("index", 0)] if opts else ""
+
+        _ST.selectbox.side_effect = _sel
+
+        def _btn(label, **kw):
+            return kw.get("key") == "ml_train_btn"
+
+        _ST.button.side_effect = _btn
+        mock_model = self._mock_ml_signal()
+        with (
+            patch("strategies.ml_signal._LGBM_AVAILABLE", True),
+            patch("strategies.ml_signal.MLSignal", return_value=mock_model),
+        ):
+            pg_ml_signals.render()
+
+        mock_model.train.assert_called_once()
+        kwargs = mock_model.train.call_args[1]
+        assert kwargs.get("label_type") == "triple_barrier"
+        # Mocked number_input returns 5.0 by default (see _reset_session)
+        pt_sl = kwargs.get("pt_sl")
+        assert pt_sl is not None
+        assert all(isinstance(v, float) for v in pt_sl)
+        num_days = kwargs.get("num_days")
+        assert num_days is not None and isinstance(num_days, int)
+        _ST.button.side_effect = None
+        _ST.button.return_value = False
+        _ST.selectbox.side_effect = (
+            lambda label, options=(), *a, **kw:
+            list(options)[kw.get("index", 0)] if list(options) else ""
+        )
+
+    def test_render_backtest_meta_labeling_path(self):
+        """With the meta-labeling checkbox on, two backtest results are stored."""
+        _reset_session()
+        # Reset widget side effects that prior tests may have mutated
+        _ST.selectbox.side_effect = (
+            lambda label, options=(), *a, **kw:
+            list(options)[kw.get("index", 0)] if list(options) else ""
+        )
+        _ST.checkbox.return_value = True
+
+        # Pretend a trained model is in session state already
+        trained = MagicMock()
+        trained._model = MagicMock()
+        trained._is_classifier = False
+        trained.score_features.return_value = np.linspace(-0.3, 0.3, 5)
+        _ST.session_state["ml_model_instance"] = trained
+
+        def _btn(label, **kw):
+            return kw.get("key") == "ml_backtest_btn"
+
+        _ST.button.side_effect = _btn
+
+        # Two tiny indices: 5 feature rows, 60 ohlcv rows
+        idx = pd.date_range("2024-01-01", periods=5, freq="B")
+        feature_cols = [
+            "ret_1d", "ret_5d", "ret_10d", "ret_21d",
+            "skew_21d", "kurt_21d", "autocorr_1", "realised_vol_21d",
+            "vol_ratio_20d", "vol_zscore_20d",
+        ]
+        # Build a MultiIndex FM with focus_ticker="AAPL"
+        fm_rows = []
+        for d in idx:
+            fm_rows.append({"date": d, "ticker": "AAPL",
+                             **{c: 0.0 for c in feature_cols}})
+        fm = pd.DataFrame(fm_rows).set_index(["date", "ticker"])
+
+        bt_result = MagicMock(
+            total_return_pct=1.0, sharpe_ratio=0.5,
+            max_drawdown_pct=-2.0, num_trades=3,
+            equity_curve=pd.DataFrame({"Equity": [1, 1.01], "BuyHold": [1, 1.005]}),
+        )
+
+        with (
+            patch("strategies.ml_signal.MLSignal", return_value=self._mock_ml_signal()),
+            patch("data.features.build_feature_matrix", return_value=fm),
+            patch("data.fetcher.fetch_ohlcv", return_value=_ohlcv(60)),
+            patch("backtester.engine.run_signal_backtest", return_value=bt_result),
+            patch(
+                "analysis.triple_barrier.triple_barrier_labels",
+                return_value=pd.DataFrame(
+                    {"bin": [1, -1, 1, 0, -1], "ret": [0.01]*5, "target": [0.02]*5},
+                    index=idx,
+                ),
+            ),
+            patch("strategies.meta_label._SKLEARN_AVAILABLE", True),
+            patch("strategies.meta_label.MetaLabeler") as mock_labeler_cls,
+        ):
+            labeler = MagicMock()
+            labeler.fit.return_value = {"train_accuracy": 0.6, "n_samples": 5, "positive_rate": 0.5}
+            labeler.predict.return_value = pd.Series([0.7, -0.6, 0.8, 0.0, -0.9], index=idx)
+            mock_labeler_cls.return_value = labeler
+            pg_ml_signals.render()
+
+        assert "ml_backtest_result" in _ST.session_state
+        assert "ml_backtest_result_meta" in _ST.session_state
+        _ST.button.side_effect = None
+        _ST.button.return_value = False
+        _ST.checkbox.return_value = True
