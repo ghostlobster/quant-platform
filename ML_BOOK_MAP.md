@@ -127,7 +127,7 @@ graph LR
 | 19 — RNNs / LSTM                             | sequence models                |   ✅   | `strategies/dl_signal.py` (_LSTMRegressor + windowed training)  |
 | 20 — Autoencoders                            | conditional risk factors       |   ⏳   | deferred                                                        |
 | 21 — GANs                                    | synthetic time series          |   ⏳   | deferred                                                        |
-| 22 — Deep Reinforcement Learning             | trading agent                  |   🟡   | `analysis/rl_sizer.py` (sizing only); no full agent             |
+| 22 — Deep Reinforcement Learning             | trading agent                  |   ✅   | `strategies/drl_agent.py` (TradingEnv + PPO DRLAgent); `analysis/rl_sizer.py` handles sizing-only RL |
 
 Legend: ✅ implemented · 🟡 partial · ⏳ planned (issue) · _blank_ deferred.
 
