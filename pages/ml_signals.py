@@ -336,8 +336,8 @@ def render() -> None:
             except Exception as exc:
                 st.error(f"Scoring failed: {exc}")
 
-    tab_lgbm, tab_ridge, tab_bayes, tab_ensemble = st.tabs(
-        ["LGBM", "Ridge", "Bayesian", "Ensemble"]
+    tab_lgbm, tab_ridge, tab_bayes, tab_dl, tab_ensemble = st.tabs(
+        ["LGBM", "Ridge", "Bayesian", "DL", "Ensemble"]
     )
 
     with tab_lgbm:
@@ -391,12 +391,78 @@ def render() -> None:
                 st.caption("**Posterior predictive std (smaller = more confident)**")
                 st.dataframe(sigma_df, use_container_width=True, hide_index=True)
 
+    with tab_dl:
+        st.caption(
+            "LSTM sequence model over per-ticker feature windows "
+            "(Jansen Ch 17-19).  Optional dep on `torch`."
+        )
+        dl_c1, dl_c2, dl_c3 = st.columns([2, 1, 1])
+        with dl_c1:
+            dl_window = int(st.number_input(
+                "Window (bars)", min_value=3, max_value=60,
+                value=10, step=1, key="dl_window",
+            ))
+        with dl_c2:
+            dl_epochs = int(st.number_input(
+                "Epochs", min_value=1, max_value=100,
+                value=10, step=1, key="dl_epochs",
+            ))
+        with dl_c3:
+            dl_hidden = int(st.number_input(
+                "Hidden size", min_value=8, max_value=128,
+                value=32, step=8, key="dl_hidden",
+            ))
+
+        do_train_dl = st.button("Train DL Model", key="dl_train_btn")
+        if do_train_dl:
+            with st.spinner("Training LSTM alpha model (this can take a while)…"):
+                try:
+                    from strategies.dl_signal import _TORCH_AVAILABLE, DLSignal
+                    if not _TORCH_AVAILABLE:
+                        st.error(
+                            "torch is not installed.  "
+                            "Run `pip install torch>=2.0` and restart."
+                        )
+                    else:
+                        dl_model = DLSignal(window=dl_window)
+                        metrics = dl_model.train(
+                            selected_tickers, period=period,
+                            epochs=dl_epochs, hidden=dl_hidden,
+                        )
+                        st.session_state["dl_model_instance"] = dl_model
+                        st.session_state["dl_train_metrics"] = metrics
+                        st.success("DL model trained successfully.")
+                except Exception as exc:
+                    st.error(f"DL training failed: {exc}")
+
+        if "dl_train_metrics" in st.session_state:
+            dm = st.session_state["dl_train_metrics"]
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Train IC", f"{dm.get('train_ic', 0):.4f}")
+            m2.metric("Test IC",  f"{dm.get('test_ic', 0):.4f}")
+            m3.metric("N Train", str(dm.get("n_train_samples", 0)))
+            m4.metric("N Test",  str(dm.get("n_test_samples", 0)))
+
+        if st.button("Compute DL Scores", key="dl_predict_btn"):
+            with st.spinner("Scoring tickers with LSTM…"):
+                try:
+                    from strategies.dl_signal import DLSignal
+                    dl_model = st.session_state.get("dl_model_instance") or DLSignal()
+                    scores = dl_model.predict(selected_tickers, period="6mo")
+                    st.session_state["dl_scores"] = scores
+                except Exception as exc:
+                    st.error(f"DL prediction failed: {exc}")
+        if "dl_scores" in st.session_state:
+            _render_alpha_chart(st.session_state["dl_scores"])
+
     with tab_ensemble:
         if st.button("Compute Ensemble Scores", key="ensemble_predict_btn"):
             with st.spinner("Blending all available signals…"):
                 try:
                     from strategies.ensemble_signal import blend_signals
-                    source_keys = ["ml_scores", "ridge_scores", "bayes_scores"]
+                    source_keys = [
+                        "ml_scores", "ridge_scores", "bayes_scores", "dl_scores",
+                    ]
                     if enable_sentiment:
                         from strategies.sentiment_signal import (
                             sentiment_alpha_scores,
@@ -409,7 +475,7 @@ def render() -> None:
                     non_empty = [s for s in sources if s]
                     if not non_empty:
                         st.warning(
-                            "Compute at least one of LGBM / Ridge / Bayesian "
+                            "Compute at least one of LGBM / Ridge / Bayesian / DL "
                             "scores first."
                         )
                     else:

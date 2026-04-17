@@ -122,9 +122,9 @@ graph LR
 | 14 — Text Data / Sentiment Analysis          | Vader, VADER                   |   ✅   | `adapters/sentiment/vader_adapter.py`                           |
 | 15 — Topic Modeling                          | LDA on news                    |   🟡   | sentiment blend integrated via `strategies/sentiment_signal.py`; LDA topic modeling still planned |
 | 16 — Word Embeddings                         | word2vec on filings            |   ⏳   | _planned_ — see issue "Word embeddings on filings"              |
-| 17 — Deep Learning for Trading               | Keras / PyTorch intro          |   ⏳   | _planned_ — see issue "Deep learning alpha model"               |
-| 18 — CNNs                                    | image / chart patterns         |   ⏳   | _planned_ — see issue "Deep learning alpha model"               |
-| 19 — RNNs / LSTM                             | sequence models                |   ⏳   | _planned_ — see issue "Deep learning alpha model"               |
+| 17 — Deep Learning for Trading               | Keras / PyTorch intro          |   🟡   | `strategies/dl_signal.py` LSTM alpha (torch-gated); full DL workflow partial |
+| 18 — CNNs                                    | image / chart patterns         |   ⏳   | _planned_ — CNN chart patterns not yet implemented              |
+| 19 — RNNs / LSTM                             | sequence models                |   ✅   | `strategies/dl_signal.py` (_LSTMRegressor + windowed training)  |
 | 20 — Autoencoders                            | conditional risk factors       |   ⏳   | deferred                                                        |
 | 21 — GANs                                    | synthetic time series          |   ⏳   | deferred                                                        |
 | 22 — Deep Reinforcement Learning             | trading agent                  |   🟡   | `analysis/rl_sizer.py` (sizing only); no full agent             |
