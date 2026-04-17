@@ -281,7 +281,18 @@ def render() -> None:
     # ── Alpha scores ──────────────────────────────────────────────────────────
     st.markdown("#### Current Alpha Scores")
     st.caption(
-        "Compute all three signals at once, or use individual tabs to score each model separately."
+        "Compute all four signals at once, or use individual tabs to score each model separately."
+    )
+
+    enable_sentiment = st.checkbox(
+        "Enable sentiment blend",
+        value=False,
+        key="ml_enable_sentiment",
+        help=(
+            "Include cross-sectional sentiment (Jansen Ch 14) as a fourth "
+            "weighted source in the ensemble.  Uses the SENTIMENT_PROVIDER "
+            "env var — VADER by default."
+        ),
     )
 
     if st.button("Compute All Scores", key="ml_compute_all_btn", type="primary"):
@@ -310,9 +321,17 @@ def render() -> None:
                 st.session_state["bayes_scores"] = bayes_scores
                 st.session_state["bayes_sigma"] = bayes_sigma
 
-                ensemble_scores = blend_signals(
-                    lgbm_scores, ridge_scores, bayes_scores,
-                )
+                blend_sources: list[dict] = [lgbm_scores, ridge_scores, bayes_scores]
+
+                if enable_sentiment:
+                    from strategies.sentiment_signal import sentiment_alpha_scores
+
+                    sentiment_scores = sentiment_alpha_scores(selected_tickers)
+                    st.session_state["sentiment_scores"] = sentiment_scores
+                    if sentiment_scores:
+                        blend_sources.append(sentiment_scores)
+
+                ensemble_scores = blend_signals(*blend_sources)
                 st.session_state["ensemble_scores"] = ensemble_scores
             except Exception as exc:
                 st.error(f"Scoring failed: {exc}")
@@ -377,10 +396,16 @@ def render() -> None:
             with st.spinner("Blending all available signals…"):
                 try:
                     from strategies.ensemble_signal import blend_signals
-                    sources = [
-                        st.session_state.get(k, {}) for k in
-                        ("ml_scores", "ridge_scores", "bayes_scores")
-                    ]
+                    source_keys = ["ml_scores", "ridge_scores", "bayes_scores"]
+                    if enable_sentiment:
+                        from strategies.sentiment_signal import (
+                            sentiment_alpha_scores,
+                        )
+                        st.session_state["sentiment_scores"] = (
+                            sentiment_alpha_scores(selected_tickers)
+                        )
+                        source_keys.append("sentiment_scores")
+                    sources = [st.session_state.get(k, {}) for k in source_keys]
                     non_empty = [s for s in sources if s]
                     if not non_empty:
                         st.warning(
@@ -393,6 +418,15 @@ def render() -> None:
                     st.error(f"Ensemble blending failed: {exc}")
         if "ensemble_scores" in st.session_state:
             _render_alpha_chart(st.session_state["ensemble_scores"])
+        if enable_sentiment and "sentiment_scores" in st.session_state:
+            st.caption("**Cross-sectional sentiment (z-scored, clipped)**")
+            sent_df = pd.DataFrame(
+                [
+                    {"Ticker": t, "Sentiment z": s}
+                    for t, s in st.session_state["sentiment_scores"].items()
+                ]
+            ).sort_values("Sentiment z", ascending=False)
+            st.dataframe(sent_df, use_container_width=True, hide_index=True)
 
     st.divider()
 
