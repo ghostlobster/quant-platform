@@ -93,7 +93,7 @@ graph LR
 | 9 — Hyperparameter Tuning                    | Bayesian + purged CV           |   ✅   | `strategies/ml_tuning.py` (Optuna TPE)                          |
 | 10 — Bet Sizing                              | Kelly, dynamic allocation      |   ✅   | `risk/kelly.py`, `strategies/ml_execution.py`                   |
 | 11 — Dangers of Backtesting                  | deflated Sharpe, PBO           |   ⏳   | _planned_ — see issue "Deflated Sharpe + PBO"                   |
-| 12 — Backtesting Through Cross-Validation    | combinatorial-purged CV        |   🟡   | partial (purged WF only)                                        |
+| 12 — Backtesting Through Cross-Validation    | combinatorial-purged CV        |   ✅   | `backtester/combinatorial_cv.py` (combinatorial_purged_cv + paths_dataframe) |
 | 13 — Backtesting on Synthetic Data           | bootstrap, GAN                 |   🟡   | bootstrap in `backtester/monte_carlo.py`; GAN out of scope      |
 | 14 — Backtest Statistics                     | Sharpe, Sortino, MAR           |   ✅   | `analysis/risk_metrics.py`, `backtester/engine.py`              |
 | 15 — Understanding Strategy Risk             | efficient frontier, VaR        |   ✅   | `risk/markowitz.py`, `risk/var.py`                              |
