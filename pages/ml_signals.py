@@ -450,7 +450,11 @@ def render() -> None:
     fi_col, coef_col = st.columns(2)
 
     with fi_col:
-        st.markdown("#### LGBM Feature Importance (Top 20)")
+        st.markdown("#### LGBM Feature Importance (MDI, Top 20)")
+        st.caption(
+            "Mean Decrease in Impurity — LightGBM's built-in importance "
+            "(López de Prado AFML Ch 8)."
+        )
         with st.spinner("Loading feature importances…"):
             try:
                 from strategies.ml_signal import MLSignal
@@ -463,6 +467,23 @@ def render() -> None:
             st.info("No LGBM model. Click **Train LGBM Baseline** to train one.")
         else:
             _render_feature_importance(fi_df.head(20))
+
+        if st.button(
+            "Compute MDA Importance (permutation)", key="ml_mda_btn",
+            help=(
+                "Mean Decrease in Accuracy — shuffle each feature on a "
+                "held-out fold and measure the drop in Spearman IC.  "
+                "Slower than MDI but more robust to correlated features."
+            ),
+        ):
+            with st.spinner("Running permutation importance…"):
+                try:
+                    _compute_and_store_mda(selected_tickers, period)
+                except Exception as exc:
+                    st.error(f"MDA computation failed: {exc}")
+
+        if "ml_mda_importance" in st.session_state:
+            _render_mda_importance(st.session_state["ml_mda_importance"])
 
     with coef_col:
         st.markdown("#### Ridge Feature Coefficients (Top 20)")
@@ -639,6 +660,69 @@ def _render_alpha_chart(scores: dict[str, float]) -> None:
         xaxis=dict(range=[-1.1, 1.1]),
         height=max(300, len(tickers) * 22),
         margin=dict(l=80, r=40, t=50, b=40),
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def _compute_and_store_mda(selected_tickers: list[str], period: str) -> None:
+    """Compute MDA feature importance for the currently trained LGBM model
+    and stash it in ``st.session_state['ml_mda_importance']``."""
+    from data.features import _FEATURE_COLS, build_feature_matrix
+    from strategies.ml_signal import MLSignal
+
+    lgbm_inst = st.session_state.get("ml_model_instance") or MLSignal()
+    if lgbm_inst._model is None:
+        st.warning("Train the LGBM model first (MDA requires a fitted model).")
+        return
+
+    fm = build_feature_matrix(selected_tickers, period=period)
+    if fm.empty:
+        st.error("Feature matrix is empty — nothing to permute.")
+        return
+
+    feature_cols = [c for c in _FEATURE_COLS if c in fm.columns]
+    target_col = "fwd_ret_5d"
+    fm = fm.dropna(subset=[target_col])
+    if fm.empty:
+        st.error("No rows with a non-NaN target for MDA.")
+        return
+
+    X = fm[feature_cols]
+    y = fm[target_col].values
+
+    # Wrap the trained model so mda_importance can call .fit() / .predict()
+    # against the same object without retraining a new estimator from scratch.
+    class _FrozenModel:
+        def __init__(self, model): self._m = model
+        def fit(self, X_arr, y_arr): return self
+        def predict(self, X_arr): return self._m.predict(X_arr)
+
+    from analysis.feature_importance import mda_importance
+    result = mda_importance(_FrozenModel(lgbm_inst._model), X, y)
+    st.session_state["ml_mda_importance"] = result.importance
+
+
+def _render_mda_importance(mda_series: pd.Series) -> None:
+    if mda_series is None or mda_series.empty:
+        st.info("No MDA data available.")
+        return
+    top = mda_series.sort_values(ascending=False).head(20)
+    colors = ["#e67e22" if v >= 0 else "#95a5a6" for v in top.values]
+    fig = go.Figure(go.Bar(
+        x=top.values,
+        y=top.index,
+        orientation="h",
+        marker_color=colors,
+        text=[f"{v:+.4f}" for v in top.values],
+        textposition="outside",
+    ))
+    fig.update_layout(
+        title="MDA Feature Importance (Δ test IC when shuffled)",
+        xaxis_title="Importance (IC drop)",
+        yaxis_title="Feature",
+        height=max(300, len(top) * 26),
+        margin=dict(l=140, r=40, t=50, b=40),
+        yaxis=dict(autorange="reversed"),
     )
     st.plotly_chart(fig, use_container_width=True)
 

@@ -89,10 +89,10 @@ graph LR
 | 5 — Fractionally Differentiated Features     | stationarity vs memory         |   ✅   | `data/frac_diff.py`                                             |
 | 6 — Ensemble Methods                         | bagging, boosting              |   ✅   | `strategies/ensemble_signal.py`, LightGBM                       |
 | 7 — Cross-Validation in Finance              | purged + embargoed K-fold      |   ✅   | `backtester/walk_forward.py:purged_walk_forward`                |
-| 8 — Feature Importance                       | MDI, MDA, SFI                  |   🟡   | partial (SHAP in `ml_signal.py`); MDA planned                   |
+| 8 — Feature Importance                       | MDI, MDA, SFI                  |   ✅   | `analysis/feature_importance.py` (mda_importance + mdi_importance) |
 | 9 — Hyperparameter Tuning                    | Bayesian + purged CV           |   ✅   | `strategies/ml_tuning.py` (Optuna TPE)                          |
 | 10 — Bet Sizing                              | Kelly, dynamic allocation      |   ✅   | `risk/kelly.py`, `strategies/ml_execution.py`                   |
-| 11 — Dangers of Backtesting                  | deflated Sharpe, PBO           |   ⏳   | _planned_ — see issue "Deflated Sharpe + PBO"                   |
+| 11 — Dangers of Backtesting                  | deflated Sharpe, PBO           |   ✅   | `analysis/deflated_sharpe.py` (deflated_sharpe + probability_backtest_overfitting) |
 | 12 — Backtesting Through Cross-Validation    | combinatorial-purged CV        |   ✅   | `backtester/combinatorial_cv.py` (combinatorial_purged_cv + paths_dataframe) |
 | 13 — Backtesting on Synthetic Data           | bootstrap, GAN                 |   🟡   | bootstrap in `backtester/monte_carlo.py`; GAN out of scope      |
 | 14 — Backtest Statistics                     | Sharpe, Sortino, MAR           |   ✅   | `analysis/risk_metrics.py`, `backtester/engine.py`              |
