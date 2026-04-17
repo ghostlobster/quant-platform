@@ -114,7 +114,7 @@ graph LR
 | 6 — The Machine Learning Process             | CV, HPO, pipelines             |   ✅   | `backtester/walk_forward.py`, `strategies/ml_tuning.py`         |
 | 7 — Linear Models                            | Ridge, Lasso, risk factors     |   ✅   | `strategies/linear_signal.py`                                   |
 | 8 — The ML4T Workflow                        | backtest loop                  |   ✅   | `backtester/engine.py:run_signal_backtest`                      |
-| 9 — Time-Series Models                       | GARCH, cointegration           |   🟡   | cointegration partial (`strategies/pairs.py` OLS); GARCH planned|
+| 9 — Time-Series Models                       | GARCH, cointegration           |   ✅   | `analysis/garch.py` (fit_garch) + `analysis/cointegration.py` (engle_granger, screen_cointegrated_pairs) |
 | 10 — Bayesian ML                             | Bayesian linear regression     |   ✅   | `strategies/bayesian_signal.py` (BayesianRidge + predict_with_uncertainty) |
 | 11 — Random Forests                          | long-short strategies          |   🟡   | used internally by `meta_label.py`; no dedicated strategy       |
 | 12 — Boosting                                | LightGBM / XGBoost             |   ✅   | `strategies/ml_signal.py`                                       |
