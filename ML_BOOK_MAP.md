@@ -118,7 +118,7 @@ graph LR
 | 10 — Bayesian ML                             | Bayesian linear regression     |   ⏳   | _planned_ — see issue "Bayesian regression"                     |
 | 11 — Random Forests                          | long-short strategies          |   🟡   | used internally by `meta_label.py`; no dedicated strategy       |
 | 12 — Boosting                                | LightGBM / XGBoost             |   ✅   | `strategies/ml_signal.py`                                       |
-| 13 — Unsupervised Learning                   | PCA, k-means, risk factors     |   ⏳   | _planned_ — see issue "PCA / k-means risk factors"              |
+| 13 — Unsupervised Learning                   | PCA, k-means, risk factors     |   ✅   | `analysis/unsupervised.py` (PCA loadings + scree; k-means on corr-distance) |
 | 14 — Text Data / Sentiment Analysis          | Vader, VADER                   |   ✅   | `adapters/sentiment/vader_adapter.py`                           |
 | 15 — Topic Modeling                          | LDA on news                    |   ⏳   | _planned_ — see issue "Topic modeling on news"                  |
 | 16 — Word Embeddings                         | word2vec on filings            |   ⏳   | _planned_ — see issue "Word embeddings on filings"              |
