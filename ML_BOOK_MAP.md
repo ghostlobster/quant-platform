@@ -44,6 +44,7 @@ graph LR
         B5[risk/markowitz.py]
         B6[risk/var.py]
         B7[analysis/regime.py]
+        B8[risk/hrp.py<br/>Hierarchical Risk Parity]
     end
 
     subgraph Execution[Execution & Ops]
@@ -53,7 +54,7 @@ graph LR
         E4[cron/monthly_ml_retrain.py]
     end
 
-    AFML --> F3 & F4 & M4 & M5 & B1 & B4
+    AFML --> F3 & F4 & M4 & M5 & B1 & B4 & B8
     ML4T --> F1 & F2 & F5 & M1 & M2 & M3 & M5 & B2 & B3 & B5 & B6 & B7
 
     F1 --> M1 & M2
@@ -71,7 +72,7 @@ graph LR
 
     classDef done fill:#d5f5e3,stroke:#229954,color:#154360
     classDef planned fill:#fdebd0,stroke:#b9770e,color:#7e5109
-    class F1,F2,F3,F4,F5,M1,M2,M3,M4,M5,B1,B2,B3,B4,B5,B6,B7,E1,E2,E3,E4 done
+    class F1,F2,F3,F4,F5,M1,M2,M3,M4,M5,B1,B2,B3,B4,B5,B6,B7,B8,E1,E2,E3,E4 done
 ```
 
 ---
@@ -96,7 +97,7 @@ graph LR
 | 13 — Backtesting on Synthetic Data           | bootstrap, GAN                 |   🟡   | bootstrap in `backtester/monte_carlo.py`; GAN out of scope      |
 | 14 — Backtest Statistics                     | Sharpe, Sortino, MAR           |   ✅   | `analysis/risk_metrics.py`, `backtester/engine.py`              |
 | 15 — Understanding Strategy Risk             | efficient frontier, VaR        |   ✅   | `risk/markowitz.py`, `risk/var.py`                              |
-| 16 — ML Asset Allocation                     | Hierarchical Risk Parity       |   ⏳   | _planned_ — see issue "HRP allocator"                           |
+| 16 — ML Asset Allocation                     | Hierarchical Risk Parity       |   ✅   | `risk/hrp.py` (quasi-diag + recursive bisection)                 |
 | 17 — Structural Breaks                       | CUSUM, Chow tests              |   ⏳   | _planned_ — see issue "Structural break detection"              |
 | 18 — Entropy Features                        | Shannon / plug-in / K-L        |   ⏳   | _planned_ — see issue "Entropy features"                        |
 | 19 — Microstructural Features                | VPIN, Kyle λ                   |   ⏳   | _planned_ — see issue "Microstructural features"                |
