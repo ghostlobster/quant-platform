@@ -9,7 +9,12 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from data.features import _FEATURE_COLS, _FWD_COLS, build_feature_matrix
+from data.features import (
+    _FEATURE_COLS,
+    _FWD_COLS,
+    _TB_LABEL_COLS,
+    build_feature_matrix,
+)
 
 
 def _make_ohlcv(n: int = 200, seed: int = 42, start: str = "2022-01-01") -> pd.DataFrame:
@@ -139,6 +144,35 @@ def test_volume_ratio_formula():
     valid = solo["vol_ratio_20d"].dropna()
     assert len(valid) > 0
     assert (valid > 0).all(), "vol_ratio_20d should be positive"
+
+
+def test_build_feature_matrix_triple_barrier_emits_bin_column():
+    """label_type='triple_barrier' adds tb_bin/tb_ret/tb_target columns with
+    values in the expected support."""
+    tickers = ["AAPL", "MSFT"]
+    with patch("data.features.fetch_ohlcv", side_effect=_mock_fetch):
+        fm = build_feature_matrix(
+            tickers, period="2y",
+            label_type="triple_barrier", pt_sl=(1.0, 1.0), num_days=5,
+        )
+
+    for col in _TB_LABEL_COLS:
+        assert col in fm.columns, f"Missing triple-barrier column: {col}"
+
+    bins = fm["tb_bin"].dropna().unique()
+    assert set(bins).issubset({-1, 0, 1}), f"unexpected tb_bin values: {bins}"
+
+    assert fm["tb_target"].dropna().ge(0).all(), "tb_target (vol) must be non-negative"
+
+
+def test_build_feature_matrix_fwd_ret_default_has_no_tb_columns():
+    """Default label_type keeps the feature matrix free of triple-barrier cols."""
+    tickers = ["AAPL"]
+    with patch("data.features.fetch_ohlcv", side_effect=_mock_fetch):
+        fm = build_feature_matrix(tickers, period="2y")
+
+    for col in _TB_LABEL_COLS:
+        assert col not in fm.columns
 
 
 def test_realised_vol_is_finite():

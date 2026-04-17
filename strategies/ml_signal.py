@@ -48,6 +48,8 @@ _DEFAULT_REGIME_MODELS_PATH = os.environ.get(
     "LGBM_REGIME_MODELS_PATH", "models/lgbm_regime_models.pkl"
 )
 _TARGET_COL = "fwd_ret_5d"
+_TB_TARGET_COL = "tb_bin"
+_TB_RET_COL = "tb_ret"
 # Minimum (date, ticker) rows per regime required to train a regime-specific model
 _MIN_REGIME_SAMPLES = 100
 
@@ -93,6 +95,7 @@ class MLSignal:
         self._model_path: str = model_path or _DEFAULT_MODEL_PATH
         self._regime_model_path: str = regime_model_path or _DEFAULT_REGIME_MODELS_PATH
         self._model = None
+        self._is_classifier: bool = False
         self._regime_models: dict = {}
         self._load_if_available()
         self._load_regime_models_if_available()
@@ -110,8 +113,20 @@ class MLSignal:
                 log.info("ml_signal: lightgbm not installed, using momentum fallback")
                 return
             with open(path, "rb") as f:
-                self._model = pickle.load(f)
-            log.info("ml_signal: loaded baseline model checkpoint", path=str(path))
+                payload = pickle.load(f)
+            # Newer checkpoints are {"model": model, "is_classifier": bool}.
+            # Older checkpoints are the raw estimator — treat as regressor.
+            if isinstance(payload, dict) and "model" in payload:
+                self._model = payload["model"]
+                self._is_classifier = bool(payload.get("is_classifier", False))
+            else:
+                self._model = payload
+                self._is_classifier = False
+            log.info(
+                "ml_signal: loaded baseline model checkpoint",
+                path=str(path),
+                classifier=self._is_classifier,
+            )
         except Exception as exc:
             log.warning("ml_signal: failed to load baseline checkpoint", path=str(path), error=str(exc))
 
@@ -124,7 +139,16 @@ class MLSignal:
             if not _LGBM_AVAILABLE:
                 return
             with open(path, "rb") as f:
-                self._regime_models = pickle.load(f)
+                payload = pickle.load(f)
+            if isinstance(payload, dict) and "models" in payload:
+                self._regime_models = payload["models"]
+                # Preserve classifier flag if baseline hasn't set it.
+                self._is_classifier = self._is_classifier or bool(
+                    payload.get("is_classifier", False)
+                )
+            else:
+                # Legacy format: bare dict of {regime: model}
+                self._regime_models = payload
             log.info(
                 "ml_signal: loaded regime models",
                 path=str(path),
@@ -141,6 +165,9 @@ class MLSignal:
         period: str = "2y",
         test_size: float = 0.2,
         lgbm_params: dict | None = None,
+        label_type: str = "fwd_ret",
+        pt_sl: tuple[float, float] = (1.0, 1.0),
+        num_days: int = 5,
     ) -> dict[str, float]:
         """
         Build feature matrix, train baseline LightGBM, evaluate on held-out
@@ -152,7 +179,11 @@ class MLSignal:
         period     : yfinance period string for data fetching
         test_size  : fraction of time series reserved for out-of-sample eval
                      (chronological split — latest test_size of dates)
-        lgbm_params : override default LGBMRegressor parameters
+        lgbm_params : override default LGBMRegressor / LGBMClassifier params
+        label_type : "fwd_ret" (regressor on fwd_ret_5d) or "triple_barrier"
+                     (classifier on the tb_bin {-1, 0, +1} label)
+        pt_sl      : (profit-take, stop-loss) multipliers; triple-barrier only
+        num_days   : vertical-barrier horizon in days; triple-barrier only
 
         Returns
         -------
@@ -168,16 +199,25 @@ class MLSignal:
                 "lightgbm is not installed. Run: pip install lightgbm>=4.0.0"
             )
 
-        log.info("ml_signal: building feature matrix", tickers=len(tickers), period=period)
-        fm = build_feature_matrix(tickers, period=period)
+        is_classifier = label_type == "triple_barrier"
+        target_col = _TB_TARGET_COL if is_classifier else _TARGET_COL
+
+        log.info(
+            "ml_signal: building feature matrix",
+            tickers=len(tickers), period=period, label_type=label_type,
+        )
+        fm = build_feature_matrix(
+            tickers, period=period,
+            label_type=label_type, pt_sl=pt_sl, num_days=num_days,
+        )
 
         if fm.empty:
             raise ValueError("Feature matrix is empty — check tickers and period")
 
         # Drop rows with missing target
-        fm = fm.dropna(subset=[_TARGET_COL])
+        fm = fm.dropna(subset=[target_col])
         if fm.empty:
-            raise ValueError(f"No rows with non-NaN target '{_TARGET_COL}'")
+            raise ValueError(f"No rows with non-NaN target '{target_col}'")
 
         # Chronological train/test split on unique dates
         all_dates = sorted(fm.index.get_level_values("date").unique())
@@ -191,25 +231,43 @@ class MLSignal:
         test_df = fm[fm.index.get_level_values("date").isin(test_dates)]
 
         X_train = train_df[feature_cols].values
-        y_train = train_df[_TARGET_COL].values
         X_test = test_df[feature_cols].values
-        y_test = test_df[_TARGET_COL].values
+        if is_classifier:
+            y_train = train_df[target_col].astype(int).values
+            y_test = test_df[target_col].astype(int).values
+            # Evaluate IC against the realised return, not the {-1,0,+1} label
+            ic_eval_train = train_df[_TB_RET_COL].astype(float).values
+            ic_eval_test = test_df[_TB_RET_COL].astype(float).values
+        else:
+            y_train = train_df[target_col].values
+            y_test = test_df[target_col].values
+            ic_eval_train = y_train
+            ic_eval_test = y_test
 
         log.info(
             "ml_signal: training",
             n_train=len(X_train),
             n_test=len(X_test),
             features=len(feature_cols),
+            classifier=is_classifier,
         )
 
         params = {**_DEFAULT_LGBM_PARAMS, **(lgbm_params or {})}
-        model = lgb.LGBMRegressor(**params)
+        if is_classifier:
+            model = lgb.LGBMClassifier(**params)
+        else:
+            model = lgb.LGBMRegressor(**params)
         model.fit(X_train, y_train)
         self._model = model
+        self._is_classifier = is_classifier
 
-        # Evaluate IC on train and test sets
-        train_ic, train_icir = self._eval_ic(model, X_train, y_train)
-        test_ic, test_icir = self._eval_ic(model, X_test, y_test)
+        # Evaluate IC on train and test sets (against realised return)
+        train_ic, train_icir = self._eval_ic(
+            model, X_train, ic_eval_train, classifier=is_classifier,
+        )
+        test_ic, test_icir = self._eval_ic(
+            model, X_test, ic_eval_test, classifier=is_classifier,
+        )
 
         log.info(
             "ml_signal: training complete",
@@ -217,10 +275,10 @@ class MLSignal:
             test_ic=round(test_ic, 4),
         )
 
-        # Persist checkpoint
+        # Persist checkpoint (versioned payload preserves is_classifier flag)
         Path(self._model_path).parent.mkdir(parents=True, exist_ok=True)
         with open(self._model_path, "wb") as f:
-            pickle.dump(model, f)
+            pickle.dump({"model": model, "is_classifier": is_classifier}, f)
         log.info("ml_signal: baseline checkpoint saved", path=self._model_path)
 
         # Write metadata to quant.db
@@ -249,6 +307,9 @@ class MLSignal:
         min_regime_samples: int = _MIN_REGIME_SAMPLES,
         test_size: float = 0.2,
         lgbm_params: dict | None = None,
+        label_type: str = "fwd_ret",
+        pt_sl: tuple[float, float] = (1.0, 1.0),
+        num_days: int = 5,
     ) -> dict[str, dict]:
         """
         Train one LGBMRegressor per market regime.
@@ -280,19 +341,26 @@ class MLSignal:
         if not _LGBM_AVAILABLE:
             raise RuntimeError("lightgbm is not installed.")
 
+        is_classifier = label_type == "triple_barrier"
+        target_col = _TB_TARGET_COL if is_classifier else _TARGET_COL
+
         log.info(
             "ml_signal: building feature matrix for regime models",
             tickers=len(tickers),
             period=period,
+            label_type=label_type,
         )
-        fm = build_feature_matrix(tickers, period=period)
+        fm = build_feature_matrix(
+            tickers, period=period,
+            label_type=label_type, pt_sl=pt_sl, num_days=num_days,
+        )
 
         if fm.empty:
             raise ValueError("Feature matrix is empty — check tickers and period")
 
-        fm = fm.dropna(subset=[_TARGET_COL])
+        fm = fm.dropna(subset=[target_col])
         if fm.empty:
-            raise ValueError(f"No rows with non-NaN target '{_TARGET_COL}'")
+            raise ValueError(f"No rows with non-NaN target '{target_col}'")
 
         # Label each row with its market regime
         regime_series = self._get_historical_regimes(period)
@@ -333,15 +401,28 @@ class MLSignal:
             test_df = regime_fm[regime_fm.index.get_level_values("date").isin(test_dates)]
 
             X_train = train_df[feature_cols].values
-            y_train = train_df[_TARGET_COL].values
             X_test = test_df[feature_cols].values
-            y_test = test_df[_TARGET_COL].values
+            if is_classifier:
+                y_train = train_df[target_col].astype(int).values
+                y_test = test_df[target_col].astype(int).values
+                ic_eval_train = train_df[_TB_RET_COL].astype(float).values
+                ic_eval_test = test_df[_TB_RET_COL].astype(float).values
+                model = lgb.LGBMClassifier(**params)
+            else:
+                y_train = train_df[target_col].values
+                y_test = test_df[target_col].values
+                ic_eval_train = y_train
+                ic_eval_test = y_test
+                model = lgb.LGBMRegressor(**params)
 
-            model = lgb.LGBMRegressor(**params)
             model.fit(X_train, y_train)
 
-            train_ic, train_icir = self._eval_ic(model, X_train, y_train)
-            test_ic, test_icir = self._eval_ic(model, X_test, y_test)
+            train_ic, train_icir = self._eval_ic(
+                model, X_train, ic_eval_train, classifier=is_classifier,
+            )
+            test_ic, test_icir = self._eval_ic(
+                model, X_test, ic_eval_test, classifier=is_classifier,
+            )
 
             regime_models[regime] = model
             results[regime] = {
@@ -360,9 +441,12 @@ class MLSignal:
             )
 
         self._regime_models = regime_models
+        self._is_classifier = is_classifier
         Path(self._regime_model_path).parent.mkdir(parents=True, exist_ok=True)
         with open(self._regime_model_path, "wb") as f:
-            pickle.dump(regime_models, f)
+            pickle.dump(
+                {"models": regime_models, "is_classifier": is_classifier}, f,
+            )
         log.info(
             "ml_signal: regime models saved",
             path=self._regime_model_path,
@@ -409,9 +493,27 @@ class MLSignal:
     # ── Shared eval & metadata helpers ────────────────────────────────────────
 
     @staticmethod
-    def _eval_ic(model, X: np.ndarray, y: np.ndarray) -> tuple[float, float]:
+    def _classifier_scores(model, X: np.ndarray) -> np.ndarray:
+        """Map a {-1, 0, +1} classifier's predict_proba → continuous [-1, 1].
+
+        Score = P(+1) - P(-1), which is monotone in expected directional bet
+        and lives naturally in the same band as the regressor output.
+        """
+        proba = model.predict_proba(X)
+        classes = np.asarray(model.classes_)
+        p_up = proba[:, classes == 1].sum(axis=1) if (classes == 1).any() else np.zeros(len(X))
+        p_dn = proba[:, classes == -1].sum(axis=1) if (classes == -1).any() else np.zeros(len(X))
+        return np.asarray(p_up - p_dn, dtype=float)
+
+    @classmethod
+    def _eval_ic(
+        cls, model, X: np.ndarray, y: np.ndarray, classifier: bool = False,
+    ) -> tuple[float, float]:
         """Return (IC mean, ICIR) from a predictions array vs actuals."""
-        preds = model.predict(X)
+        if classifier:
+            preds = cls._classifier_scores(model, X)
+        else:
+            preds = model.predict(X)
         # Spearman via rank correlation
         from analysis.factor_ic import _spearman_corr
         ic = _spearman_corr(preds, y)
@@ -510,7 +612,10 @@ class MLSignal:
             if latest.empty:
                 return self._momentum_fallback(tickers, period)
 
-            raw_preds = active_model.predict(latest.values)
+            if self._is_classifier and hasattr(active_model, "predict_proba"):
+                raw_preds = self._classifier_scores(active_model, latest.values)
+            else:
+                raw_preds = active_model.predict(latest.values)
 
             # Z-score and clip to [-1, 1]
             std = raw_preds.std()
@@ -545,6 +650,21 @@ class MLSignal:
             except Exception:
                 scores[ticker] = 0.0
         return scores
+
+    # ── Scoring helper (used by backtest path) ────────────────────────────────
+
+    def score_features(self, X: np.ndarray) -> np.ndarray:
+        """
+        Return raw continuous scores for a pre-built feature array.
+
+        Dispatches to predict_proba-derived P(+1)-P(-1) for classifier
+        checkpoints and to regressor.predict for regressor checkpoints.
+        """
+        if self._model is None:
+            raise RuntimeError("ml_signal.score_features: no trained model loaded")
+        if self._is_classifier and hasattr(self._model, "predict_proba"):
+            return self._classifier_scores(self._model, X)
+        return np.asarray(self._model.predict(X), dtype=float)
 
     # ── Feature importance ────────────────────────────────────────────────────
 

@@ -244,6 +244,188 @@ def test_feature_importance_with_mock_model():
     assert (fi["importance"] >= 0).all()
 
 
+# ── Triple-barrier classifier path (pure-mock, no LightGBM needed) ────────────
+
+class _PicklablePlainRegressor:
+    """Plain regressor used by checkpoint-load tests — unlike MagicMock, picklable."""
+    feature_importances_ = np.array([1.0, 2.0, 3.0])
+
+    def predict(self, X):
+        return np.zeros(len(X))
+
+
+class _PicklablePlainClassifier:
+    classes_ = np.array([-1, 0, 1])
+
+    def predict_proba(self, X):
+        return np.tile(np.array([0.2, 0.3, 0.5]), (len(X), 1))
+
+
+def _make_classifier_mock_model(n_rows: int = 4):
+    """Fake LGBMClassifier: predict_proba returns a stable 3-class distribution."""
+    mock = MagicMock()
+    mock.classes_ = np.array([-1, 0, 1])
+    probs = np.tile(np.array([0.2, 0.3, 0.5]), (n_rows, 1))
+    mock.predict_proba.return_value = probs
+    mock.feature_importances_ = np.arange(len(_FEATURE_COLS), 0, -1, dtype=float)
+    return mock
+
+
+def test_classifier_scores_uses_p_up_minus_p_down():
+    mock = _make_classifier_mock_model(n_rows=3)
+    X = np.zeros((3, 5))
+    scores = MLSignal._classifier_scores(mock, X)
+    # p_up(=0.5) − p_down(=0.2) = 0.3 for every row
+    assert scores == pytest.approx(np.array([0.3, 0.3, 0.3]))
+
+
+def test_predict_classifier_path_returns_valid_range():
+    """When _is_classifier=True, predict uses predict_proba instead of predict."""
+    fm = _make_feature_matrix(n_dates=20, n_tickers=4)
+    mock_model = _make_classifier_mock_model(n_rows=4)
+
+    with patch("strategies.ml_signal.build_feature_matrix", return_value=fm):
+        model = MLSignal(model_path="/tmp/nonexistent_clf.pkl")
+        model._model = mock_model
+        model._is_classifier = True
+        tickers = list(fm.index.get_level_values("ticker").unique())
+        scores = model.predict(tickers, period="6mo")
+
+    assert len(scores) == 4
+    # All rows share the same probability; after z-score + clip they collapse to 0
+    for s in scores.values():
+        assert -1.0 <= s <= 1.0
+    # predict_proba should have been called at least once
+    assert mock_model.predict_proba.called
+    # predict() should not have been called (we're on the classifier path)
+    mock_model.predict.assert_not_called()
+
+
+def test_score_features_dispatches_on_classifier_flag():
+    model = MLSignal(model_path="/tmp/nonexistent_sf.pkl")
+    # Regressor path
+    reg_mock = _make_mock_model()
+    model._model = reg_mock
+    model._is_classifier = False
+    out_reg = model.score_features(np.zeros((4, len(_FEATURE_COLS))))
+    assert len(out_reg) == 4
+    reg_mock.predict.assert_called_once()
+    # Classifier path
+    clf_mock = _make_classifier_mock_model(n_rows=4)
+    model._model = clf_mock
+    model._is_classifier = True
+    out_clf = model.score_features(np.zeros((4, len(_FEATURE_COLS))))
+    assert out_clf == pytest.approx(np.array([0.3, 0.3, 0.3, 0.3]))
+
+
+def test_score_features_raises_without_trained_model():
+    model = MLSignal(model_path="/tmp/nonexistent_sf2.pkl")
+    with pytest.raises(RuntimeError, match="no trained model"):
+        model.score_features(np.zeros((2, 3)))
+
+
+def test_train_triple_barrier_routes_to_classifier(monkeypatch, tmp_path):
+    """train(label_type='triple_barrier') should fit LGBMClassifier, set
+    _is_classifier=True, and persist both fields."""
+    from data.features import _FEATURE_COLS as F_COLS
+
+    # Synthetic FM with fwd_ret_5d AND tb_bin + tb_ret columns
+    np.random.seed(0)
+    n_dates, n_tickers = 40, 4
+    dates = pd.date_range("2022-01-01", periods=n_dates, freq="B")
+    tickers = [f"T{i}" for i in range(n_tickers)]
+    rows = []
+    for d in dates:
+        for t in tickers:
+            row = {"date": d, "ticker": t}
+            for c in F_COLS:
+                row[c] = np.random.randn()
+            row["fwd_ret_5d"] = np.random.randn() * 0.01
+            row["tb_bin"] = np.random.choice([-1, 0, 1])
+            row["tb_ret"] = np.random.randn() * 0.01
+            row["tb_target"] = abs(np.random.randn()) * 0.01
+            rows.append(row)
+    fm = pd.DataFrame(rows).set_index(["date", "ticker"])
+
+    fitted_kinds: list[str] = []
+
+    class _FakeRegressor:
+        def __init__(self, **_k): fitted_kinds.append("regressor")
+        def fit(self, X, y): self._y = y
+        def predict(self, X): return np.zeros(len(X))
+
+    class _FakeClassifier:
+        classes_ = np.array([-1, 0, 1])
+        def __init__(self, **_k): fitted_kinds.append("classifier")
+        def fit(self, X, y): self._y = y
+        def predict_proba(self, X):
+            return np.tile(np.array([0.2, 0.3, 0.5]), (len(X), 1))
+
+    fake_lgb = MagicMock()
+    fake_lgb.LGBMRegressor = _FakeRegressor
+    fake_lgb.LGBMClassifier = _FakeClassifier
+
+    # Make triple_barrier FM return non-empty
+    monkeypatch.setattr(
+        "strategies.ml_signal.build_feature_matrix",
+        lambda tickers, **kwargs: fm,
+    )
+    monkeypatch.setattr("strategies.ml_signal._LGBM_AVAILABLE", True)
+    monkeypatch.setattr("strategies.ml_signal.lgb", fake_lgb)
+    monkeypatch.setattr(MLSignal, "_write_metadata", lambda *a, **k: None)
+
+    # The fake classifier is a local class → can't be pickled. Capture the
+    # payload in-memory instead.
+    captured: dict = {}
+    def _capture_pickle(obj, f):
+        captured.update(obj if isinstance(obj, dict) else {"raw": obj})
+    monkeypatch.setattr("strategies.ml_signal.pickle.dump", _capture_pickle)
+
+    ckpt = tmp_path / "clf.pkl"
+    model = MLSignal(model_path=str(ckpt))
+    metrics = model.train(
+        [f"T{i}" for i in range(n_tickers)],
+        period="2y",
+        label_type="triple_barrier",
+    )
+
+    assert model._is_classifier is True
+    assert "classifier" in fitted_kinds
+    assert "regressor" not in fitted_kinds
+    assert "train_ic" in metrics
+
+    # Checkpoint payload preserves the classifier flag
+    assert captured.get("is_classifier") is True
+    assert "model" in captured
+
+
+def test_load_legacy_regressor_checkpoint(tmp_path):
+    """Legacy checkpoints (bare estimator pickle) load as regressor."""
+    import pickle
+    ckpt = tmp_path / "legacy.pkl"
+    with open(ckpt, "wb") as f:
+        pickle.dump(_PicklablePlainRegressor(), f)
+
+    with patch("strategies.ml_signal._LGBM_AVAILABLE", True):
+        model = MLSignal(model_path=str(ckpt))
+    assert model._model is not None
+    assert model._is_classifier is False
+
+
+def test_load_versioned_classifier_checkpoint(tmp_path):
+    """Versioned checkpoints round-trip is_classifier=True."""
+    import pickle
+    ckpt = tmp_path / "versioned.pkl"
+    with open(ckpt, "wb") as f:
+        pickle.dump(
+            {"model": _PicklablePlainClassifier(), "is_classifier": True}, f,
+        )
+
+    with patch("strategies.ml_signal._LGBM_AVAILABLE", True):
+        model = MLSignal(model_path=str(ckpt))
+    assert model._is_classifier is True
+
+
 # ── MLSignal — with LightGBM (skipped if not installed) ───────────────────────
 
 @pytest.mark.skipif(not _LGBM_AVAILABLE, reason="lightgbm not installed")

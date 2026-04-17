@@ -41,7 +41,16 @@ def main() -> None:
             log.error("ml_retrain: lightgbm is not installed — aborting")
             sys.exit(1)
 
-        result = MLSignal().train(tickers, period=period)
+        # Pick up tuned hyperparameters from the last Optuna run, if any.
+        from strategies.ml_tuning import load_best_params
+
+        best_params = load_best_params("lgbm_alpha")
+        if best_params:
+            log.info("ml_retrain: using tuned params", n_params=len(best_params))
+        else:
+            log.info("ml_retrain: no tuned params found, using defaults")
+
+        result = MLSignal().train(tickers, period=period, lgbm_params=best_params)
 
         log.info(
             "ml_retrain: complete",

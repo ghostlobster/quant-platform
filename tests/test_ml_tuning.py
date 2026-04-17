@@ -15,6 +15,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from strategies.ml_tuning import (
     _OPTUNA_AVAILABLE,
     _purged_splits,
+    load_best_params,
+    save_best_params,
     tune_lgbm_hyperparams,
 )
 
@@ -65,6 +67,69 @@ def test_tune_lgbm_raises_on_empty_feature_matrix(monkeypatch):
     )
     with pytest.raises(RuntimeError, match="feature matrix is empty"):
         tune_lgbm_hyperparams(["AAPL"], period="1y", n_trials=1)
+
+
+def test_save_and_load_best_params_round_trip(tmp_path, monkeypatch):
+    """save_best_params → load_best_params recovers the original dict."""
+    import sqlite3
+    db_path = tmp_path / "params.db"
+
+    def _fake_conn():
+        conn = sqlite3.connect(str(db_path))
+        conn.row_factory = sqlite3.Row
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS model_best_params (
+                model_name   TEXT    PRIMARY KEY,
+                updated_at   REAL    NOT NULL,
+                params_json  TEXT    NOT NULL,
+                best_ic      REAL
+            )
+        """)
+        return conn
+
+    monkeypatch.setattr("data.db.get_connection", _fake_conn)
+
+    params = {
+        "n_estimators": 200, "learning_rate": 0.05, "num_leaves": 31,
+    }
+    save_best_params("lgbm_alpha", params, best_ic=0.042)
+    recovered = load_best_params("lgbm_alpha")
+    assert recovered == params
+
+    # Missing row returns None (not an exception)
+    assert load_best_params("does_not_exist") is None
+
+
+def test_save_best_params_upserts_on_conflict(tmp_path, monkeypatch):
+    """Re-saving for the same model_name overwrites the previous row."""
+    import sqlite3
+    db_path = tmp_path / "params.db"
+
+    def _fake_conn():
+        conn = sqlite3.connect(str(db_path))
+        conn.row_factory = sqlite3.Row
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS model_best_params (
+                model_name   TEXT    PRIMARY KEY,
+                updated_at   REAL    NOT NULL,
+                params_json  TEXT    NOT NULL,
+                best_ic      REAL
+            )
+        """)
+        return conn
+
+    monkeypatch.setattr("data.db.get_connection", _fake_conn)
+
+    save_best_params("lgbm_alpha", {"lr": 0.01}, best_ic=0.01)
+    save_best_params("lgbm_alpha", {"lr": 0.05}, best_ic=0.08)
+    assert load_best_params("lgbm_alpha") == {"lr": 0.05}
+
+
+def test_load_best_params_handles_db_error(monkeypatch):
+    """Transient DB errors return None rather than propagating."""
+    def _broken(): raise RuntimeError("db down")
+    monkeypatch.setattr("data.db.get_connection", _broken)
+    assert load_best_params("lgbm_alpha") is None
 
 
 @pytest.mark.skipif(not _OPTUNA_AVAILABLE, reason="optuna not installed")

@@ -46,14 +46,53 @@ def render() -> None:
         st.warning("Select at least one ticker.")
         return
 
+    # ── Label type selector (López de Prado Ch 3) ─────────────────────────────
+    label_type = st.selectbox(
+        "Label type",
+        options=["fwd_ret", "triple_barrier"],
+        index=0,
+        key="ml_label_type",
+        help=(
+            "fwd_ret: regressor on 5-day forward return (default). "
+            "triple_barrier: classifier on the {-1, 0, +1} label from the "
+            "first-touched profit-take / stop-loss / vertical barrier."
+        ),
+    )
+    pt_sl: tuple[float, float] = (1.0, 1.0)
+    num_days = 5
+    if label_type == "triple_barrier":
+        lab_pt, lab_sl, lab_nd = st.columns(3)
+        with lab_pt:
+            pt_val = st.number_input(
+                "Profit-take × σ", min_value=0.5, max_value=5.0,
+                value=1.0, step=0.25, key="ml_pt",
+            )
+        with lab_sl:
+            sl_val = st.number_input(
+                "Stop-loss × σ", min_value=0.5, max_value=5.0,
+                value=1.0, step=0.25, key="ml_sl",
+            )
+        with lab_nd:
+            num_days = int(st.number_input(
+                "Vertical barrier (days)", min_value=2, max_value=30,
+                value=5, step=1, key="ml_nd",
+            ))
+        pt_sl = (float(pt_val), float(sl_val))
+
     # ── Train / Retrain ───────────────────────────────────────────────────────
-    col_lgbm, col_regime, col_ridge = st.columns(3)
+    col_lgbm, col_regime, col_ridge, col_tune = st.columns(4)
     with col_lgbm:
         do_train = st.button("Train LGBM Baseline", type="primary", key="ml_train_btn")
     with col_regime:
         do_train_regime = st.button("Train Regime Models", key="ml_train_regime_btn")
     with col_ridge:
         do_train_ridge = st.button("Train Ridge Model", key="ml_train_ridge_btn")
+    with col_tune:
+        tune_trials = int(st.number_input(
+            "Tune trials", min_value=5, max_value=100, value=20, step=5,
+            key="ml_tune_trials",
+        ))
+        do_tune = st.button("Optimize Hyperparameters", key="ml_tune_btn")
 
     if do_train:
         with st.spinner("Building feature matrix and training LightGBM alpha model…"):
@@ -66,7 +105,11 @@ def render() -> None:
                     )
                 else:
                     model = MLSignal()
-                    metrics = model.train(selected_tickers, period=period)
+                    metrics = model.train(
+                        selected_tickers, period=period,
+                        label_type=label_type, pt_sl=pt_sl, num_days=num_days,
+                        lgbm_params=st.session_state.get("ml_best_params"),
+                    )
                     st.session_state["ml_model_instance"] = model
                     st.session_state["ml_train_metrics"] = metrics
                     st.success("LGBM baseline model trained successfully.")
@@ -81,7 +124,11 @@ def render() -> None:
                     st.error("lightgbm is not installed.")
                 else:
                     model = st.session_state.get("ml_model_instance") or MLSignal()
-                    regime_results = model.train_regime_models(selected_tickers, period=period)
+                    regime_results = model.train_regime_models(
+                        selected_tickers, period=period,
+                        label_type=label_type, pt_sl=pt_sl, num_days=num_days,
+                        lgbm_params=st.session_state.get("ml_best_params"),
+                    )
                     st.session_state["ml_model_instance"] = model
                     st.session_state["ml_regime_results"] = regime_results
                     if regime_results:
@@ -113,6 +160,49 @@ def render() -> None:
                     st.success("Ridge model trained successfully.")
             except Exception as exc:
                 st.error(f"Ridge training failed: {exc}")
+
+    if do_tune:
+        with st.spinner(f"Running Optuna TPE search ({tune_trials} trials)…"):
+            try:
+                from strategies.ml_tuning import (
+                    _OPTUNA_AVAILABLE,
+                    save_best_params,
+                    tune_lgbm_hyperparams,
+                )
+                if not _OPTUNA_AVAILABLE:
+                    st.error(
+                        "optuna is not installed. "
+                        "Run `pip install optuna>=3.5.0` and restart the app."
+                    )
+                else:
+                    tune_result = tune_lgbm_hyperparams(
+                        selected_tickers, period=period, n_trials=tune_trials,
+                    )
+                    st.session_state["ml_best_params"] = tune_result["best_params"]
+                    st.session_state["ml_tune_result"] = tune_result
+                    save_best_params(
+                        "lgbm_alpha",
+                        tune_result["best_params"],
+                        tune_result["best_ic"],
+                    )
+                    st.success(
+                        f"Tuning complete — best IC {tune_result['best_ic']:.4f} "
+                        f"over {tune_result['n_trials']} trials."
+                    )
+            except Exception as exc:
+                st.error(f"Hyperparameter tuning failed: {exc}")
+
+    if "ml_tune_result" in st.session_state:
+        tr = st.session_state["ml_tune_result"]
+        st.caption("**Best Hyperparameters (Optuna TPE)**")
+        tm1, tm2 = st.columns(2)
+        tm1.metric("Best IC", f"{tr.get('best_ic', 0):.4f}")
+        tm2.metric("Trials", str(tr.get("n_trials", 0)))
+        params_df = pd.DataFrame(
+            [(k, v) for k, v in tr.get("best_params", {}).items()],
+            columns=["param", "value"],
+        )
+        st.dataframe(params_df, use_container_width=True, hide_index=True)
 
     # ── LGBM training metrics ─────────────────────────────────────────────────
     if "ml_train_metrics" in st.session_state:
@@ -243,10 +333,26 @@ def render() -> None:
             options=selected_tickers,
             key="ml_backtest_ticker",
         )
+        apply_meta = st.checkbox(
+            "Apply meta-labeling",
+            value=False,
+            key="ml_bt_meta",
+            help=(
+                "Wrap the primary LGBM signal with a RandomForest confidence "
+                "filter trained on triple-barrier labels (López de Prado Ch 3)."
+            ),
+        )
+        min_conf = st.slider(
+            "Min confidence",
+            min_value=0.0, max_value=0.9, value=0.5, step=0.05,
+            key="ml_bt_min_conf",
+            disabled=not apply_meta,
+        )
+
         if st.button("Run ML Backtest", key="ml_backtest_btn"):
             with st.spinner(f"Building signals for {focus_ticker} and running backtest…"):
                 try:
-                    from backtester.engine import build_equity_chart, run_signal_backtest
+                    from backtester.engine import run_signal_backtest
                     from data.features import _FEATURE_COLS, build_feature_matrix
                     from data.fetcher import fetch_ohlcv
                     from strategies.ml_signal import MLSignal
@@ -267,7 +373,7 @@ def render() -> None:
                                 ticker_fm = None
 
                             if ticker_fm is not None and not ticker_fm.empty:
-                                raw_preds = model._model.predict(ticker_fm.values)
+                                raw_preds = model.score_features(ticker_fm.values)
                                 signals = pd.Series(raw_preds, index=ticker_fm.index)
 
                                 ohlcv = fetch_ohlcv(focus_ticker, period)
@@ -280,19 +386,26 @@ def render() -> None:
                                         ticker=focus_ticker,
                                     )
                                     st.session_state["ml_backtest_result"] = bt_result
+                                    st.session_state.pop("ml_backtest_result_meta", None)
+
+                                    if apply_meta:
+                                        meta_result = _run_meta_labeled_backtest(
+                                            ohlcv=ohlcv,
+                                            ticker=focus_ticker,
+                                            ticker_fm=ticker_fm,
+                                            raw_preds=raw_preds,
+                                            min_confidence=float(min_conf),
+                                        )
+                                        if meta_result is not None:
+                                            st.session_state["ml_backtest_result_meta"] = meta_result
 
                 except Exception as exc:
                     st.error(f"Backtest failed: {exc}")
 
-    if "ml_backtest_result" in st.session_state:
-        r = st.session_state["ml_backtest_result"]
-        bc1, bc2, bc3, bc4 = st.columns(4)
-        bc1.metric("Total Return", f"{r.total_return_pct:.2f}%")
-        bc2.metric("Sharpe", f"{r.sharpe_ratio:.3f}")
-        bc3.metric("Max DD", f"{r.max_drawdown_pct:.2f}%")
-        bc4.metric("Trades", str(r.num_trades))
-        from backtester.engine import build_equity_chart
-        st.plotly_chart(build_equity_chart(r), use_container_width=True)
+    _render_backtest_results(
+        st.session_state.get("ml_backtest_result"),
+        st.session_state.get("ml_backtest_result_meta"),
+    )
 
     st.divider()
 
@@ -393,6 +506,112 @@ def render() -> None:
 
 
 # ── Private rendering helpers ─────────────────────────────────────────────────
+
+def _run_meta_labeled_backtest(
+    *,
+    ohlcv: pd.DataFrame,
+    ticker: str,
+    ticker_fm: pd.DataFrame,
+    raw_preds,
+    min_confidence: float,
+):
+    """Fit a meta-labeler on triple-barrier bins and backtest the filtered signal.
+
+    Returns a ``BacktestResult`` on success or ``None`` on failure (with a
+    Streamlit warning surfaced inline).  Failures are expected when sklearn
+    isn't installed or when all bins are neutral — in both cases there is
+    nothing meaningful to overlay.
+    """
+    import numpy as np
+
+    from analysis.triple_barrier import triple_barrier_labels
+    from backtester.engine import run_signal_backtest
+    from strategies.meta_label import (
+        MetaLabeler,
+        filter_primary_by_confidence,
+    )
+
+    close = ohlcv["Close"].astype(float)
+    bins = triple_barrier_labels(
+        close, events=close.index, pt_sl=(1.0, 1.0), num_days=5,
+    )["bin"]
+
+    primary = pd.Series(
+        np.sign(np.asarray(raw_preds, dtype=float)),
+        index=ticker_fm.index,
+    )
+
+    try:
+        labeler = MetaLabeler()
+        labeler.fit(primary, bins, ticker_fm)
+        final = labeler.predict(primary, ticker_fm)
+    except (RuntimeError, ValueError) as exc:
+        st.warning(f"Meta-labeling skipped: {exc}")
+        return None
+
+    filtered = filter_primary_by_confidence(
+        primary, final, min_confidence=min_confidence,
+    )
+
+    return run_signal_backtest(
+        ohlcv, filtered,
+        strategy_name="ML Signal (meta)",
+        ticker=ticker,
+    )
+
+
+def _render_backtest_results(raw_result, meta_result) -> None:
+    """Render the raw backtest metrics + optional meta-labeled overlay."""
+    if raw_result is None:
+        return
+
+    from backtester.engine import build_equity_chart
+
+    bc1, bc2, bc3, bc4 = st.columns(4)
+    bc1.metric("Total Return", f"{raw_result.total_return_pct:.2f}%")
+    bc2.metric("Sharpe", f"{raw_result.sharpe_ratio:.3f}")
+    bc3.metric("Max DD", f"{raw_result.max_drawdown_pct:.2f}%")
+    bc4.metric("Trades", str(raw_result.num_trades))
+
+    if meta_result is None:
+        st.plotly_chart(build_equity_chart(raw_result), use_container_width=True)
+        return
+
+    st.caption("**Meta-labeled backtest (RandomForest × primary LGBM)**")
+    mc1, mc2, mc3, mc4 = st.columns(4)
+    mc1.metric("Total Return", f"{meta_result.total_return_pct:.2f}%")
+    mc2.metric("Sharpe", f"{meta_result.sharpe_ratio:.3f}")
+    mc3.metric("Max DD", f"{meta_result.max_drawdown_pct:.2f}%")
+    mc4.metric("Trades", str(meta_result.num_trades))
+
+    fig = go.Figure()
+    raw_eq = getattr(raw_result, "equity_curve", None)
+    if raw_eq is not None and not raw_eq.empty and "Equity" in raw_eq.columns:
+        fig.add_trace(go.Scatter(
+            x=raw_eq.index,
+            y=raw_eq["Equity"],
+            mode="lines",
+            name="Raw LGBM",
+            line=dict(color="#3498db", width=2),
+        ))
+    meta_eq = getattr(meta_result, "equity_curve", None)
+    if meta_eq is not None and not meta_eq.empty and "Equity" in meta_eq.columns:
+        fig.add_trace(go.Scatter(
+            x=meta_eq.index,
+            y=meta_eq["Equity"],
+            mode="lines",
+            name="Meta-labeled",
+            line=dict(color="#e67e22", width=2, dash="dash"),
+        ))
+    fig.update_layout(
+        title="Equity Curve — Raw vs Meta-labeled",
+        xaxis_title="Date",
+        yaxis_title="Equity",
+        height=400,
+        margin=dict(l=60, r=40, t=50, b=40),
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
 
 def _render_alpha_chart(scores: dict[str, float]) -> None:
     """Colour-coded horizontal bar chart of alpha scores."""

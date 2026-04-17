@@ -123,6 +123,16 @@ def init_db() -> None:
             )
         """)
 
+        # ----- Tuned hyperparameters (one row per model, upsert on tune) -----
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS model_best_params (
+                model_name   TEXT    PRIMARY KEY,
+                updated_at   REAL    NOT NULL,
+                params_json  TEXT    NOT NULL,
+                best_ic      REAL
+            )
+        """)
+
         # Seed paper_account if absent
         import os
         starting_cash = float(os.getenv("PAPER_STARTING_CASH", "100000"))

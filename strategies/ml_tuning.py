@@ -18,6 +18,9 @@ Optional deps
 """
 from __future__ import annotations
 
+import json
+import time
+
 import numpy as np
 import pandas as pd
 from scipy.stats import spearmanr
@@ -175,3 +178,57 @@ def tune_lgbm_hyperparams(
     log.info("tune_lgbm_hyperparams: complete", **{k: v for k, v in result.items()
                                                     if k != "best_params"})
     return result
+
+
+# ── Persistence helpers for tuned params ─────────────────────────────────────
+
+def save_best_params(
+    model_name: str,
+    params: dict,
+    best_ic: float,
+) -> None:
+    """Upsert tuned hyperparameters into quant.db model_best_params.
+
+    Logs and swallows any DB error so calling code (typically a UI button
+    handler) does not abort after a successful tune just because persistence
+    failed.
+    """
+    from data.db import get_connection
+
+    try:
+        conn = get_connection()
+        with conn:
+            conn.execute(
+                """
+                INSERT INTO model_best_params (model_name, updated_at, params_json, best_ic)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(model_name) DO UPDATE SET
+                    updated_at = excluded.updated_at,
+                    params_json = excluded.params_json,
+                    best_ic = excluded.best_ic
+                """,
+                (model_name, time.time(), json.dumps(params), float(best_ic)),
+            )
+        conn.close()
+        log.info("save_best_params: persisted", model_name=model_name, best_ic=best_ic)
+    except Exception as exc:
+        log.warning("save_best_params: failed", model_name=model_name, error=str(exc))
+
+
+def load_best_params(model_name: str) -> dict | None:
+    """Return persisted tuned hyperparameters for ``model_name`` or None."""
+    from data.db import get_connection
+
+    try:
+        conn = get_connection()
+        row = conn.execute(
+            "SELECT params_json FROM model_best_params WHERE model_name = ?",
+            (model_name,),
+        ).fetchone()
+        conn.close()
+        if row is None:
+            return None
+        return json.loads(row["params_json"])
+    except Exception as exc:
+        log.warning("load_best_params: failed", model_name=model_name, error=str(exc))
+        return None

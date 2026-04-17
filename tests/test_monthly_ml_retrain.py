@@ -112,6 +112,40 @@ def test_main_exits_on_unexpected_exception(mock_cls):
     assert exc_info.value.code == 1
 
 
+@patch("strategies.ml_tuning.load_best_params")
+@patch("cron.monthly_ml_retrain.MLSignal")
+@patch("cron.monthly_ml_retrain._LGBM_AVAILABLE", True)
+def test_main_passes_tuned_params_when_available(mock_cls, mock_load):
+    """If load_best_params returns a dict, train() must receive it as lgbm_params."""
+    tuned = {"n_estimators": 500, "learning_rate": 0.03}
+    mock_load.return_value = tuned
+    mock_instance = MagicMock()
+    mock_instance.train.return_value = _MOCK_RESULT
+    mock_cls.return_value = mock_instance
+
+    from cron.monthly_ml_retrain import main
+    main()
+
+    call_kwargs = mock_instance.train.call_args[1]
+    assert call_kwargs.get("lgbm_params") == tuned
+
+
+@patch("strategies.ml_tuning.load_best_params", return_value=None)
+@patch("cron.monthly_ml_retrain.MLSignal")
+@patch("cron.monthly_ml_retrain._LGBM_AVAILABLE", True)
+def test_main_passes_none_when_no_tuned_params(mock_cls, mock_load):
+    """No persisted params → train() is called with lgbm_params=None (defaults)."""
+    mock_instance = MagicMock()
+    mock_instance.train.return_value = _MOCK_RESULT
+    mock_cls.return_value = mock_instance
+
+    from cron.monthly_ml_retrain import main
+    main()
+
+    call_kwargs = mock_instance.train.call_args[1]
+    assert call_kwargs.get("lgbm_params") is None
+
+
 @patch("cron.monthly_ml_retrain.MLSignal")
 @patch("cron.monthly_ml_retrain._LGBM_AVAILABLE", True)
 def test_main_strips_whitespace_from_tickers(mock_cls):
