@@ -685,3 +685,141 @@ def test_ic_degradation_fires_via_live_ic_module(
     assert sig.signal == "bearish"
     assert sig.metadata["recommendation"] == "retrain"
     assert "IC" in sig.reasoning
+
+
+# ── Covariate-shift drift rung (#118) ─────────────────────────────────────────
+
+def test_drift_retrain_forces_retrain_verdict(model_paths, isolate_metadata):
+    baseline, regime = model_paths
+    _write_pickle(baseline, {"model": object()}, age_seconds=60)
+    _write_pickle(
+        regime, {"models": {"trending_bull": 1, "trending_bear": 1,
+                             "mean_reverting": 1, "high_vol": 1}}, age_seconds=60,
+    )
+    sig = KnowledgeAdaptionAgent().run({
+        "regime": "trending_bull",
+        "drift": {
+            "level": "retrain", "max_psi": 0.30,
+            "drifted_features": ["ret_5d", "realised_vol_21d"],
+        },
+    })
+    assert sig.signal == "bearish"
+    assert sig.metadata["recommendation"] == "retrain"
+    assert sig.metadata["drift_level"] == "retrain"
+    assert sig.metadata["drift_max_psi"] == pytest.approx(0.30)
+    assert sig.metadata["drifted_features"] == ["ret_5d", "realised_vol_21d"]
+    assert "covariate shift" in sig.reasoning
+
+
+def test_drift_monitor_demotes_fresh_to_monitor(model_paths, isolate_metadata):
+    baseline, regime = model_paths
+    _write_pickle(baseline, {"model": object()}, age_seconds=60)
+    _write_pickle(
+        regime, {"models": {"trending_bull": 1, "trending_bear": 1,
+                             "mean_reverting": 1, "high_vol": 1}}, age_seconds=60,
+    )
+    sig = KnowledgeAdaptionAgent().run({
+        "regime": "trending_bull",
+        "drift": {
+            "level": "monitor", "max_psi": 0.15,
+            "drifted_features": ["ret_5d"],
+        },
+    })
+    assert sig.signal == "neutral"
+    assert sig.metadata["recommendation"] == "monitor"
+    assert sig.metadata["drift_level"] == "monitor"
+    assert "covariate shift" in sig.reasoning
+
+
+def test_drift_none_keeps_fresh(model_paths, isolate_metadata):
+    baseline, regime = model_paths
+    _write_pickle(baseline, {"model": object()}, age_seconds=60)
+    _write_pickle(
+        regime, {"models": {"trending_bull": 1, "trending_bear": 1,
+                             "mean_reverting": 1, "high_vol": 1}}, age_seconds=60,
+    )
+    sig = KnowledgeAdaptionAgent().run({
+        "regime": "trending_bull",
+        "drift": {
+            "level": "none", "max_psi": 0.03, "drifted_features": [],
+        },
+    })
+    assert sig.signal == "bullish"
+    assert sig.metadata["recommendation"] == "fresh"
+    assert sig.metadata["drift_level"] == "none"
+
+
+def test_drift_does_not_override_stale_retrain(model_paths, isolate_metadata):
+    """Stale baseline trumps a merely-monitor-level drift."""
+    baseline, regime = model_paths
+    days = 60 * 86400
+    _write_pickle(baseline, {"model": object()}, age_seconds=days)
+    _write_pickle(
+        regime, {"models": {"trending_bull": 1, "trending_bear": 1,
+                             "mean_reverting": 1, "high_vol": 1}}, age_seconds=days,
+    )
+    sig = KnowledgeAdaptionAgent().run({
+        "regime": "trending_bull",
+        "drift": {"level": "monitor", "max_psi": 0.15, "drifted_features": ["x"]},
+    })
+    assert sig.metadata["recommendation"] == "retrain"
+    assert "baseline stale" in sig.reasoning
+
+
+def test_drift_score_shortcut(model_paths, isolate_metadata):
+    """Raw drift_score resolves to a tier via the default thresholds."""
+    baseline, regime = model_paths
+    _write_pickle(baseline, {"model": object()}, age_seconds=60)
+    _write_pickle(
+        regime, {"models": {"trending_bull": 1, "trending_bear": 1,
+                             "mean_reverting": 1, "high_vol": 1}}, age_seconds=60,
+    )
+    sig = KnowledgeAdaptionAgent().run(
+        {"regime": "trending_bull", "drift_score": 0.30},
+    )
+    assert sig.metadata["recommendation"] == "retrain"
+    assert sig.metadata["drift_level"] == "retrain"
+
+
+def test_drift_from_feature_frame_end_to_end(
+    tmp_path, monkeypatch, model_paths, isolate_metadata,
+):
+    """Stored fingerprint + live shifted frame → agent sees retrain drift."""
+    _isolate_stamp_db(monkeypatch, tmp_path)
+
+    baseline, regime = model_paths
+    _write_pickle(baseline, {"model": object()}, age_seconds=60)
+    _write_pickle(
+        regime, {"models": {"trending_bull": 1, "trending_bear": 1,
+                             "mean_reverting": 1, "high_vol": 1}}, age_seconds=60,
+    )
+
+    # Seed a training fingerprint directly.
+    import time as _time
+
+    import numpy as _np
+    import pandas as _pd
+
+    from data.db import get_connection
+
+    conn = get_connection()
+    with conn:
+        conn.execute(
+            "INSERT INTO model_feature_stats "
+            "(model_name, trained_at, feature_name, mean, std, "
+            " q10, q50, q90, n_samples) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("lgbm_alpha", _time.time(), "ret_5d",
+             0.0, 1.0, -1.28, 0.0, 1.28, 1000),
+        )
+    conn.close()
+
+    # Live frame with a clear +2σ shift → expect retrain.
+    rng = _np.random.default_rng(777)
+    live_frame = _pd.DataFrame({"ret_5d": rng.standard_normal(2000) + 2.0})
+
+    sig = KnowledgeAdaptionAgent().run({
+        "regime": "trending_bull",
+        "feature_frame": live_frame,
+    })
+    assert sig.metadata["recommendation"] == "retrain"
+    assert sig.metadata["drift_level"] == "retrain"

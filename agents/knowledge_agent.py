@@ -322,6 +322,105 @@ def _resolve_plateau(context: dict, model_name: str = "lgbm_alpha") -> bool:
         return False
 
 
+def _read_feature_stats(
+    model_name: str,
+) -> dict[str, dict[str, float]] | None:
+    """Return the most recent training-time feature fingerprint for
+    ``model_name`` from ``model_feature_stats``, or ``None`` when no
+    rows exist or the DB is unreachable."""
+    try:
+        from data.db import get_connection
+    except Exception:
+        return None
+    try:
+        conn = get_connection()
+    except Exception:
+        return None
+    try:
+        row = conn.execute(
+            "SELECT MAX(trained_at) AS latest FROM model_feature_stats "
+            "WHERE model_name = ?",
+            (model_name,),
+        ).fetchone()
+        latest = None if row is None else (
+            row["latest"] if hasattr(row, "keys") else row[0]
+        )
+        if latest is None:
+            return None
+        rows = conn.execute(
+            "SELECT feature_name, mean, std, q10, q50, q90, n_samples "
+            "FROM model_feature_stats "
+            "WHERE model_name = ? AND trained_at = ?",
+            (model_name, latest),
+        ).fetchall()
+    except Exception:
+        return None
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+    if not rows:
+        return None
+    out: dict[str, dict[str, float]] = {}
+    for r in rows:
+        name = r["feature_name"] if hasattr(r, "keys") else r[0]
+        out[str(name)] = {
+            "mean": float(r["mean"] if hasattr(r, "keys") else r[1]),
+            "std": float(r["std"] if hasattr(r, "keys") else r[2]),
+            "q10": float(r["q10"] if hasattr(r, "keys") else r[3]),
+            "q50": float(r["q50"] if hasattr(r, "keys") else r[4]),
+            "q90": float(r["q90"] if hasattr(r, "keys") else r[5]),
+            "n_samples": int(r["n_samples"] if hasattr(r, "keys") else r[6]),
+        }
+    return out
+
+
+def _resolve_drift(
+    context: dict,
+    model_name: str = "lgbm_alpha",
+) -> dict | None:
+    """Resolve the covariate-shift signal (#118).
+
+    Precedence:
+      1. ``context['drift']`` — full dict override (tests / advanced
+         callers). Must already match the ``aggregate_drift`` schema.
+      2. ``context['drift_score']`` — scalar shortcut (tests only); we
+         synthesise a minimal dict with an empty ``drifted_features``.
+      3. ``context['feature_frame']`` (a ``pd.DataFrame``) + stored
+         training fingerprint → run ``feature_psi`` + ``aggregate_drift``.
+      4. Otherwise → ``None`` (drift check is optional; fail-open).
+
+    Returns the ``aggregate_drift`` result dict, or ``None`` when no
+    signal is available."""
+    if "drift" in context and isinstance(context["drift"], dict):
+        return context["drift"]
+    if "drift_score" in context:
+        score = float(context["drift_score"])
+        level = "retrain" if score >= 0.25 else (
+            "monitor" if score >= 0.10 else "none"
+        )
+        return {"level": level, "max_psi": score, "drifted_features": []}
+
+    frame = context.get("feature_frame")
+    if frame is None:
+        return None
+
+    try:
+        stats = _read_feature_stats(model_name)
+        if not stats:
+            return None
+        from analysis.drift import aggregate_drift, feature_psi
+
+        psi = feature_psi(stats, frame)
+        if not psi:
+            return None
+        return aggregate_drift(psi)
+    except Exception as exc:
+        logger.debug("knowledge_agent: drift lookup failed: %s", exc)
+        return None
+
+
 def _resolve_at_risk(context: dict) -> bool:
     """Resolve the regime-boundary ``at_risk`` flag.
 
@@ -435,6 +534,10 @@ class KnowledgeAdaptionAgent:
         regime_coverage = self._cache.coverage(regime_path, self._coverage_reader)
         at_risk = _resolve_at_risk(context)
         plateau_detected = _resolve_plateau(context)
+        drift = _resolve_drift(context)
+        drift_level = (drift or {}).get("level") if drift else None
+        drift_max_psi = (drift or {}).get("max_psi") if drift else None
+        drifted_features = (drift or {}).get("drifted_features") or []
 
         trained_ic = self._metadata_reader("lgbm_alpha")
         live_ic_raw = context.get("live_ic")
@@ -454,6 +557,8 @@ class KnowledgeAdaptionAgent:
             monitor_days=monitor_days,
             at_risk=at_risk,
             plateau_detected=plateau_detected,
+            drift_level=drift_level,
+            drift_max_psi=drift_max_psi,
         )
 
         auto_retrain_meta: dict[str, Any] | None = None
@@ -474,6 +579,9 @@ class KnowledgeAdaptionAgent:
             "monitor_days": monitor_days,
             "at_risk": at_risk,
             "plateau_detected": plateau_detected,
+            "drift_level": drift_level,
+            "drift_max_psi": drift_max_psi,
+            "drifted_features": drifted_features,
         }
         if auto_retrain_meta is not None:
             metadata["auto_retrain"] = auto_retrain_meta
@@ -500,6 +608,8 @@ class KnowledgeAdaptionAgent:
         monitor_days: float,
         at_risk: bool = False,
         plateau_detected: bool = False,
+        drift_level: str | None = None,
+        drift_max_psi: float | None = None,
     ) -> dict[str, Any]:
         """First-match condition ladder → (signal, confidence, reasoning, recommendation)."""
         # 1. Missing baseline pickle — worst case, no model to serve.
@@ -521,7 +631,17 @@ class KnowledgeAdaptionAgent:
                 f"live IC decayed ({ic_ratio:.0%} of trained)",
             )
 
-        # 3. Regime coverage gap.
+        # 3. Covariate shift (#118) above the retrain threshold — the
+        #    earliest leading indicator of lost edge. Trumps coverage
+        #    gaps because shifted inputs invalidate every regime bucket.
+        if drift_level == "retrain":
+            psi_text = f" (PSI {drift_max_psi:.2f})" if drift_max_psi is not None else ""
+            return _verdict(
+                "bearish", 0.7, "retrain",
+                f"covariate shift over retrain threshold{psi_text}",
+            )
+
+        # 4. Regime coverage gap.
         if regime and regime not in regime_coverage:
             covered = ",".join(regime_coverage) or "none"
             return _verdict(
@@ -529,7 +649,7 @@ class KnowledgeAdaptionAgent:
                 f"no dedicated model for regime '{regime}' (covered: {covered})",
             )
 
-        # 4. Retrain window approaching.
+        # 5. Retrain window approaching.
         if (
             baseline_age > monitor_days
             or (regime_age is not None and regime_age > monitor_days)
@@ -542,7 +662,16 @@ class KnowledgeAdaptionAgent:
                 why = f"retrain window approaching ({oldest:.0f}d)"
             return _verdict("neutral", 0.5, "monitor", why)
 
-        # 5. Near a regime boundary — demote fresh to monitor so consumers
+        # 6. Covariate shift approaching retrain threshold — softer rung
+        #    so operators investigate before the shift hits 0.25.
+        if drift_level == "monitor":
+            psi_text = f" (PSI {drift_max_psi:.2f})" if drift_max_psi is not None else ""
+            return _verdict(
+                "neutral", 0.5, "monitor",
+                f"covariate shift approaching retrain threshold{psi_text}",
+            )
+
+        # 7. Near a regime boundary — demote fresh to monitor so consumers
         #    downweight the signal proactively.
         if at_risk:
             return _verdict(
@@ -550,7 +679,7 @@ class KnowledgeAdaptionAgent:
                 "regime near boundary — elevated coverage risk",
             )
 
-        # 6. IC plateau — retraining is not paying off, feature drift suspected.
+        # 8. IC plateau — retraining is not paying off, feature drift suspected.
         #    Demote fresh to monitor so the operator investigates instead of
         #    blindly trusting the next retrain to recover the edge.
         if plateau_detected:
@@ -559,7 +688,7 @@ class KnowledgeAdaptionAgent:
                 "IC plateau over 3 retrains — feature drift suspected",
             )
 
-        # 7. Fresh & covered.
+        # 9. Fresh & covered.
         return _verdict(
             "bullish", 0.8, "fresh",
             f"models fresh ({baseline_age:.0f}d) and regime '{regime or '?'}' covered",

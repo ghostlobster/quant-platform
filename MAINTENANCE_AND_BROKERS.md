@@ -534,6 +534,41 @@ Cached reads (`@st.cache_data`): 60 s for the SQL helpers, 300 s for
 the `KnowledgeAdaptionAgent().run({})` call (matches the agent's own
 pickle-read TTL).
 
+### 11.6 Covariate-shift detector (#118)
+
+At training time `MLSignal.train()` persists a compact per-feature
+fingerprint (mean, std, q10/50/90, n_samples) to the new
+`model_feature_stats` table — one row per
+`(model_name, trained_at, feature_name)`, `INSERT OR REPLACE`.
+
+Drift is then available via `analysis.drift`:
+
+- `summarize_features(frame, feature_cols)` — the fingerprint writer;
+  drops columns with fewer than 30 non-NaN rows.
+- `feature_psi(training_stats, live_frame, feature_cols)` — Population
+  Stability Index per feature, computed by reconstructing 10 bin edges
+  from the quantile anchors + ±3σ tails. An approximation (the
+  fingerprint does not carry the raw training sample) — tests pin the
+  approximation error below 10 % on synthetic Gaussian shifts.
+- `kolmogorov_smirnov(train, live)` — thin wrapper around
+  `scipy.stats.ks_2samp` for callers that still have both raw samples.
+- `aggregate_drift(psi_scores)` — collapses a per-feature PSI dict to
+  `{"level": "none"|"monitor"|"retrain", "max_psi": float|None,
+  "drifted_features": list[str]}`.
+
+`KnowledgeAdaptionAgent` consumes `context["drift"]` (full dict),
+`context["drift_score"]` (scalar shortcut), or `context["feature_frame"]`
+(raw live DataFrame — the agent reads the stored fingerprint and runs
+PSI). Defaults: `_DRIFT_PSI_MONITOR=0.10`, `_DRIFT_PSI_RETRAIN=0.25`
+(AFML / ML4T Ch 17 conventions). Drift verdicts slot into the ladder
+**after** hard staleness and IC-collapse but **before** regime-coverage
+gaps — shifted inputs invalidate every regime bucket, so they trump a
+single missing regime.
+
+`metadata["drift_level"]`, `metadata["drift_max_psi"]`, and
+`metadata["drifted_features"]` are surfaced on every agent run so the
+Model Health tab (#121) can display them.
+
 ### 11.3 Opt-in auto-retrain trigger (#119)
 
 **Default: off.** Set `KNOWLEDGE_AUTO_RETRAIN=1` in the environment of

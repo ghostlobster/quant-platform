@@ -100,7 +100,7 @@ graph LR
 | 14 — Backtest Statistics                     | Sharpe, Sortino, MAR           |   ✅   | `analysis/risk_metrics.py`, `backtester/engine.py`              |
 | 15 — Understanding Strategy Risk             | efficient frontier, VaR        |   ✅   | `risk/markowitz.py`, `risk/var.py`                              |
 | 16 — ML Asset Allocation                     | Hierarchical Risk Parity       |   ✅   | `risk/hrp.py` (quasi-diag + recursive bisection)                 |
-| 17 — Structural Breaks                       | CUSUM, Chow tests              |   ✅   | `analysis/structural_breaks.py` (cusum_events + cusum_events_from_prices) |
+| 17 — Structural Breaks                       | CUSUM, Chow tests, PSI/KS drift |   ✅   | `analysis/structural_breaks.py` (cusum_events + cusum_events_from_prices), `analysis/drift.py` (PSI + KS feeding KnowledgeAdaptionAgent #118) |
 | 18 — Entropy Features                        | Shannon / plug-in / K-L        |   ✅   | `analysis/entropy_features.py` (plug_in, lempel_ziv, konto) |
 | 19 — Microstructural Features                | VPIN, Kyle λ                   |   ✅   | `analysis/microstructure.py` (bvc_buy_fraction + vpin + kyle_lambda) |
 

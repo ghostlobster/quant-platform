@@ -186,6 +186,30 @@ def init_db() -> None:
                 ON live_predictions (model_name, ts DESC)
         """)
 
+        # ----- Feature distribution fingerprint (issue #118) -----------
+        # One row per (model_name, trained_at, feature_name). Captures a
+        # compact summary of every training-time feature column so
+        # analysis.drift can compute PSI/KS against a live feature frame
+        # without re-reading the raw training data.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS model_feature_stats (
+                model_name    TEXT    NOT NULL,
+                trained_at    REAL    NOT NULL,
+                feature_name  TEXT    NOT NULL,
+                mean          REAL    NOT NULL,
+                std           REAL    NOT NULL,
+                q10           REAL    NOT NULL,
+                q50           REAL    NOT NULL,
+                q90           REAL    NOT NULL,
+                n_samples     INTEGER NOT NULL,
+                PRIMARY KEY (model_name, trained_at, feature_name)
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_feature_stats_model_ts
+                ON model_feature_stats (model_name, trained_at DESC)
+        """)
+
         # Seed paper_account if absent
         import os
         starting_cash = float(os.getenv("PAPER_STARTING_CASH", "100000"))
