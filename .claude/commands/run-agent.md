@@ -1,5 +1,5 @@
 ---
-description: Invoke a specialist trading agent (regime, risk, sentiment, screener, execution) or the meta-agent with a ticker context, and display the AgentSignal.
+description: Invoke a specialist trading agent (regime, risk, sentiment, screener, execution, knowledge) or the meta-agent with a ticker context, and display the AgentSignal.
 argument-hint: <agent_name> <ticker>
 ---
 
@@ -7,7 +7,7 @@ Invoke one of the trading agents defined in `agents/` with a minimal context and
 
 ## Arguments
 
-- `<agent_name>`: one of `regime`, `risk`, `sentiment`, `screener`, `execution`, `meta` (case-insensitive).
+- `<agent_name>`: one of `regime`, `risk`, `sentiment`, `screener`, `execution`, `knowledge`, `meta` (case-insensitive).
 - `<ticker>`: symbol, validated against `^[A-Z0-9]{1,6}(\.[A-Z]{1,2})?$` — same regex as `agents/meta_agent.py:25`.
 
 Reject unknown agent names with a list of valid options. Reject malformed tickers with the regex.
@@ -21,6 +21,7 @@ Reject unknown agent names with a list of valid options. Reject malformed ticker
 | `sentiment` | `SentimentAgent` | `agents.sentiment_agent` |
 | `screener` | `ScreenerAgent` | `agents.screener_agent` |
 | `execution` | `ExecutionAgent` | `agents.execution_agent` |
+| `knowledge` | `KnowledgeAdaptionAgent` | `agents.knowledge_agent` |
 | `meta` | `MetaAgent` | `agents.meta_agent` |
 
 ## Execution

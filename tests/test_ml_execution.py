@@ -59,10 +59,17 @@ def _held(ticker: str, qty: float = 10.0) -> dict:
 
 @pytest.fixture(autouse=True)
 def _patch_regime_and_prices():
-    """Keep regime lookup deterministic and avoid yfinance in every test."""
+    """Keep regime lookup deterministic and avoid yfinance in every test.
+
+    The knowledge gate is stubbed to "fresh" so existing sizing tests are not
+    perturbed by missing model pickles in the test checkout.  New tests below
+    override ``_knowledge_gate`` explicitly where needed.
+    """
     with patch("strategies.ml_execution._current_regime", return_value="trending_bull"), \
          patch("strategies.ml_execution.fetch_ohlcv",
-               return_value=pd.DataFrame({"Close": [150.0]})):
+               return_value=pd.DataFrame({"Close": [150.0]})), \
+         patch("strategies.ml_execution._knowledge_gate",
+               return_value=(1.0, "fresh", False)):
         yield
 
 
@@ -210,3 +217,64 @@ def test_positions_fetch_failure_falls_back_to_empty():
 
     assert "AAPL" in _buys_for(broker)
     assert any(a.startswith("BUY AAPL") for a in actions)
+
+
+# ── Knowledge-adaption gate ───────────────────────────────────────────────
+
+def test_knowledge_gate_skips_all_when_baseline_missing():
+    """retrain + baseline missing → no buys even for strong positive scores."""
+    broker = FakeBroker(positions=[], equity=100_000.0)
+    scores = {"AAPL": 0.9, "MSFT": 0.8}
+
+    with patch("strategies.ml_execution._knowledge_gate",
+               return_value=(0.4, "retrain", True)):
+        actions = execute_ml_signals(scores, threshold=0.3, max_positions=5, broker=broker)
+
+    assert actions == []
+    assert _buys_for(broker) == []
+
+
+def test_knowledge_gate_reduces_kelly_on_monitor():
+    """monitor recommendation (0.7×) produces smaller qty than fresh (1.0×)."""
+    fresh = FakeBroker(positions=[], equity=1_000_000.0)
+    monitor = FakeBroker(positions=[], equity=1_000_000.0)
+
+    with patch("strategies.ml_execution._knowledge_gate",
+               return_value=(1.0, "fresh", False)):
+        execute_ml_signals({"AAPL": 0.9}, threshold=0.3, max_positions=5, broker=fresh)
+    with patch("strategies.ml_execution._knowledge_gate",
+               return_value=(0.7, "monitor", False)):
+        execute_ml_signals({"AAPL": 0.9}, threshold=0.3, max_positions=5, broker=monitor)
+
+    assert monitor.orders[0]["qty"] < fresh.orders[0]["qty"]
+
+
+def test_knowledge_gate_reduces_kelly_on_retrain_without_skip():
+    """retrain + pickles present (skip_all=False) still shrinks sizing."""
+    fresh = FakeBroker(positions=[], equity=1_000_000.0)
+    retrain = FakeBroker(positions=[], equity=1_000_000.0)
+
+    with patch("strategies.ml_execution._knowledge_gate",
+               return_value=(1.0, "fresh", False)):
+        execute_ml_signals({"AAPL": 0.9}, threshold=0.3, max_positions=5, broker=fresh)
+    with patch("strategies.ml_execution._knowledge_gate",
+               return_value=(0.4, "retrain", False)):
+        execute_ml_signals({"AAPL": 0.9}, threshold=0.3, max_positions=5, broker=retrain)
+
+    assert 0 < retrain.orders[0]["qty"] < fresh.orders[0]["qty"]
+
+
+def test_knowledge_gate_still_exits_bearish_positions_when_skip():
+    """skip_all blocks buys but existing bearish positions should still be exited."""
+    broker = FakeBroker(positions=[_held("AAPL", qty=10.0)], equity=100_000.0)
+
+    with patch("strategies.ml_execution._knowledge_gate",
+               return_value=(0.4, "retrain", True)):
+        actions = execute_ml_signals(
+            {"AAPL": -0.7, "MSFT": 0.9}, threshold=0.3, max_positions=5, broker=broker
+        )
+
+    # AAPL should be sold (risk-reducing), MSFT must not be bought.
+    assert "AAPL" in _sells_for(broker)
+    assert _buys_for(broker) == []
+    assert any(a.startswith("SELL AAPL") for a in actions)
