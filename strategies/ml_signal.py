@@ -603,18 +603,39 @@ class MLSignal:
         train_ic: float,
         test_ic: float,
     ) -> None:
-        """Persist training metadata to quant.db model_metadata table."""
+        """Persist training metadata to quant.db model_metadata table.
+
+        On retrain #2 onward also computes ``test_ic_delta`` as
+        ``this_test_ic - previous_test_ic`` for the same ``model_name`` so
+        downstream consumers (``analysis/retrain_roi.py``,
+        ``KnowledgeAdaptionAgent``) can detect IC plateaus.
+        """
         try:
             from data.db import get_connection
             conn = get_connection()
             with conn:
+                prev_row = conn.execute(
+                    "SELECT test_ic FROM model_metadata "
+                    "WHERE model_name = ? ORDER BY trained_at DESC LIMIT 1",
+                    ("lgbm_alpha",),
+                ).fetchone()
+                prev_ic = None
+                if prev_row is not None:
+                    raw = prev_row["test_ic"] if hasattr(prev_row, "keys") else prev_row[0]
+                    if raw is not None:
+                        prev_ic = float(raw)
+                delta = None if prev_ic is None else float(test_ic) - prev_ic
                 conn.execute(
                     """
                     INSERT INTO model_metadata
-                        (model_name, trained_at, train_ic, test_ic, n_tickers, period)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                        (model_name, trained_at, train_ic, test_ic,
+                         n_tickers, period, test_ic_delta)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
                     """,
-                    ("lgbm_alpha", time.time(), train_ic, test_ic, n_tickers, period),
+                    (
+                        "lgbm_alpha", time.time(), train_ic, test_ic,
+                        n_tickers, period, delta,
+                    ),
                 )
             conn.close()
         except Exception as exc:

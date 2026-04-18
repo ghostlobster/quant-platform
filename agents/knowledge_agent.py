@@ -212,6 +212,27 @@ def _resolve_regime(context: dict) -> str | None:
         return None
 
 
+def _resolve_plateau(context: dict, model_name: str = "lgbm_alpha") -> bool:
+    """Resolve the ``plateau_detected`` flag.
+
+    Precedence:
+      1. ``context['plateau_detected']`` — explicit caller override (tests).
+      2. Otherwise, read the last ``n`` ``test_ic_delta`` rows via
+         ``analysis.retrain_roi.is_ic_plateau``.
+
+    Fails open to ``False`` so a DB hiccup never spuriously demotes the
+    agent's verdict.
+    """
+    if "plateau_detected" in context:
+        return bool(context.get("plateau_detected"))
+    try:
+        from analysis.retrain_roi import is_ic_plateau
+        return bool(is_ic_plateau(model_name, n=3))
+    except Exception as exc:
+        logger.debug("knowledge_agent: plateau lookup failed: %s", exc)
+        return False
+
+
 def _resolve_at_risk(context: dict) -> bool:
     """Resolve the regime-boundary ``at_risk`` flag.
 
@@ -320,6 +341,7 @@ class KnowledgeAdaptionAgent:
         regime = _resolve_regime(context)
         regime_coverage = self._cache.coverage(regime_path, self._coverage_reader)
         at_risk = _resolve_at_risk(context)
+        plateau_detected = _resolve_plateau(context)
 
         trained_ic = self._metadata_reader("lgbm_alpha")
         live_ic_raw = context.get("live_ic")
@@ -338,6 +360,7 @@ class KnowledgeAdaptionAgent:
             stale_days=stale_days,
             monitor_days=monitor_days,
             at_risk=at_risk,
+            plateau_detected=plateau_detected,
         )
 
         if verdict["recommendation"] == "retrain":
@@ -355,6 +378,7 @@ class KnowledgeAdaptionAgent:
             "stale_days": stale_days,
             "monitor_days": monitor_days,
             "at_risk": at_risk,
+            "plateau_detected": plateau_detected,
         }
 
         return AgentSignal(
@@ -378,6 +402,7 @@ class KnowledgeAdaptionAgent:
         stale_days: float,
         monitor_days: float,
         at_risk: bool = False,
+        plateau_detected: bool = False,
     ) -> dict[str, Any]:
         """First-match condition ladder → (signal, confidence, reasoning, recommendation)."""
         # 1. Missing baseline pickle — worst case, no model to serve.
@@ -428,7 +453,16 @@ class KnowledgeAdaptionAgent:
                 "regime near boundary — elevated coverage risk",
             )
 
-        # 6. Fresh & covered.
+        # 6. IC plateau — retraining is not paying off, feature drift suspected.
+        #    Demote fresh to monitor so the operator investigates instead of
+        #    blindly trusting the next retrain to recover the edge.
+        if plateau_detected:
+            return _verdict(
+                "neutral", 0.5, "monitor",
+                "IC plateau over 3 retrains — feature drift suspected",
+            )
+
+        # 7. Fresh & covered.
         return _verdict(
             "bullish", 0.8, "fresh",
             f"models fresh ({baseline_age:.0f}d) and regime '{regime or '?'}' covered",
