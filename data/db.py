@@ -122,6 +122,14 @@ def init_db() -> None:
                 PRIMARY KEY (model_name, trained_at)
             )
         """)
+        # Idempotent add of the test_ic_delta column for retrain-ROI tracking
+        # (#122). Nullable + populated only on retrain #2 onward so legacy
+        # rows are preserved.
+        existing_cols = {
+            row[1] for row in conn.execute("PRAGMA table_info(model_metadata)")
+        }
+        if "test_ic_delta" not in existing_cols:
+            conn.execute("ALTER TABLE model_metadata ADD COLUMN test_ic_delta REAL")
 
         # ----- Tuned hyperparameters (one row per model, upsert on tune) -----
         conn.execute("""
