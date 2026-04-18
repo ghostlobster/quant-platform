@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ruff check:*)",
+      "Bash(ruff check . --fix)",
+      "Bash(pytest tests/:*)",
+      "Bash(bandit -r . -ll --exclude ./.git,./tests:*)",
+      "Bash(pip-audit -r requirements.txt:*)",
+      "Bash(python -m cron.daily_ml_execute)",
+      "Bash(python -m cron.monthly_ml_retrain)",
+      "Bash(python -c:*)"
+    ]
+  }
+}
