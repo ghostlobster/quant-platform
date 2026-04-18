@@ -1,65 +1,48 @@
 ---
-description: Invoke a specialist trading agent (regime, risk, sentiment, screener, execution, knowledge) or the meta-agent with a ticker context, and display the AgentSignal.
+description: Invoke a specialist trading agent (regime, risk, sentiment, screener, execution, knowledge) or the meta-agent with a ticker context, and display the AgentSignal. Delegates to the `trading-agent-runner` subagent so large JSON payloads stay out of the main context.
 argument-hint: <agent_name> <ticker>
 ---
 
-Invoke one of the trading agents defined in `agents/` with a minimal context and print the resulting `AgentSignal` (see `agents/base.py:15-48`).
+Delegate to the `trading-agent-runner` subagent with the parsed arguments.
+This keeps verbose agent output (full reasoning, metadata dumps) out of the
+main conversation — the subagent returns only a 3-line summary unless the
+user explicitly asks for raw JSON.
 
 ## Arguments
 
-- `<agent_name>`: one of `regime`, `risk`, `sentiment`, `screener`, `execution`, `knowledge`, `meta` (case-insensitive).
-- `<ticker>`: symbol, validated against `^[A-Z0-9]{1,6}(\.[A-Z]{1,2})?$` — same regex as `agents/meta_agent.py:25`.
+- `<agent_name>`: one of `regime`, `risk`, `sentiment`, `screener`,
+  `execution`, `knowledge`, `meta` (case-insensitive).
+- `<ticker>`: symbol matching `^[A-Z0-9]{1,6}(\.[A-Z]{1,2})?$` — same regex as
+  `agents/meta_agent.py:25`.
 
-Reject unknown agent names with a list of valid options. Reject malformed tickers with the regex.
+If either argument is missing or malformed, print the usage line and stop;
+**do not** dispatch to the subagent:
+
+```
+/run-agent <regime|risk|sentiment|screener|execution|knowledge|meta> <TICKER>
+```
 
 ## Dispatch
 
-| agent_name | Class | Module |
-|---|---|---|
-| `regime` | `RegimeAgent` | `agents.regime_agent` |
-| `risk` | `RiskAgent` | `agents.risk_agent` |
-| `sentiment` | `SentimentAgent` | `agents.sentiment_agent` |
-| `screener` | `ScreenerAgent` | `agents.screener_agent` |
-| `execution` | `ExecutionAgent` | `agents.execution_agent` |
-| `knowledge` | `KnowledgeAdaptionAgent` | `agents.knowledge_agent` |
-| `meta` | `MetaAgent` | `agents.meta_agent` |
+Launch the `trading-agent-runner` subagent with a self-contained prompt:
 
-## Execution
+> Run the `<agent_name>` agent on ticker `<TICKER>`. Return the compact
+> 3-line summary documented in your definition. Include raw JSON only if the
+> user explicitly asked for it.
 
-Run a one-shot Python invocation. For specialists:
+The subagent handles module dispatch, execution, and failure reporting. See
+`.claude/agents/trading-agent-runner.md` for the full interface.
 
-```
-python -c "
-import json
-from agents.<module> import <Class>
-agent = <Class>()
-sig = agent.run({'ticker': '<TICKER>'})
-print(json.dumps({
-    'agent': sig.agent_name,
-    'signal': sig.signal,
-    'confidence': sig.confidence,
-    'reasoning': sig.reasoning,
-    'metadata': sig.metadata,
-}, indent=2, default=str))
-"
-```
+## After the subagent returns
 
-For `meta`, `MetaAgent.run()` already returns a dict (see `agents/meta_agent.py:136-150`) — dump it directly:
-
-```
-python -c "
-import json
-from agents.meta_agent import MetaAgent
-result = MetaAgent().run({'ticker': '<TICKER>'})
-print(json.dumps(result, indent=2, default=str))
-"
-```
-
-## Output
-
-Show the JSON result as a formatted block. Do not edit files. If the agent raises, show the exception class and message; suggest checking the agent's dependencies (e.g., sentiment needs an LLM provider configured via `LLM_PROVIDER`).
+Forward the 3-line summary to the user verbatim. If the user then asks for
+"full output" or "raw JSON", re-invoke the subagent with the explicit
+raw-JSON request — do not attempt to reconstruct the payload.
 
 ## Notes
 
-- `MetaAgent` reads `AGENT_WEIGHTS` and `AGENT_LLM_ARBITER` from the environment (`agents/meta_agent.py:9-11`). Do not override them from this command.
-- `python -c:*` is pre-approved in `.claude/settings.json`, so this runs without a permission prompt.
+- `MetaAgent` reads `AGENT_WEIGHTS` and `AGENT_LLM_ARBITER` from the
+  environment (`agents/meta_agent.py:9-11`). Do not override them from this
+  command.
+- `python -c:*` is pre-approved in `.claude/settings.json`, so the subagent
+  runs without permission prompts.

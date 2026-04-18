@@ -1,14 +1,65 @@
 {
   "permissions": {
     "allow": [
-      "Bash(ruff check:*)",
-      "Bash(ruff check . --fix)",
-      "Bash(pytest tests/:*)",
-      "Bash(bandit -r . -ll --exclude ./.git,./tests:*)",
-      "Bash(pip-audit -r requirements.txt:*)",
-      "Bash(python -m cron.daily_ml_execute)",
-      "Bash(python -m cron.monthly_ml_retrain)",
-      "Bash(python -c:*)"
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git branch:*)",
+      "Bash(git rev-parse:*)",
+      "Bash(git stash list:*)",
+      "Bash(ls:*)",
+      "Bash(find:*)",
+      "Bash(wc:*)",
+      "Bash(tree:*)",
+      "Bash(ruff:*)",
+      "Bash(pytest:*)",
+      "Bash(bandit:*)",
+      "Bash(pip-audit:*)",
+      "Bash(python -m pytest:*)",
+      "Bash(python -m cron.daily_ml_execute:*)",
+      "Bash(python -m cron.monthly_ml_retrain:*)",
+      "Bash(python -m cron.monthly_wf:*)",
+      "Bash(python -c:*)",
+      "Bash(docker compose config)",
+      "Bash(docker compose ps)"
     ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/session-start.sh"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/guard-bash.sh"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/stop-reminder.sh"
+          }
+        ]
+      }
+    ]
+  },
+  "statusLine": {
+    "type": "command",
+    "command": ".claude/statusline.sh"
   }
 }
