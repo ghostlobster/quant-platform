@@ -152,6 +152,18 @@ def init_db() -> None:
             )
         """)
 
+        # ----- Knowledge agent stamps (issue #119) ---------------------
+        # One row per named stamp. Used by KnowledgeAdaptionAgent to dedup
+        # opt-in auto-retrain launches across process restarts (the in-
+        # process alert cooldown is kept separately — this stamp is for
+        # expensive side-effects that must survive restarts).
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS knowledge_stamps (
+                name           TEXT    PRIMARY KEY,
+                last_fired_at  REAL    NOT NULL
+            )
+        """)
+
         # Seed paper_account if absent
         import os
         starting_cash = float(os.getenv("PAPER_STARTING_CASH", "100000"))

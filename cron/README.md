@@ -101,6 +101,17 @@ The checkpoint is also recorded in `quant.db` → `model_metadata` table.
 | ML_TRAIN_PERIOD       | 2y                         | yfinance period for training data  |
 | LGBM_ALPHA_MODEL_PATH | models/lgbm_alpha.pkl      | Path to save the model checkpoint  |
 
+## Opt-in auto-trigger from KnowledgeAdaptionAgent (#119)
+
+Setting `KNOWLEDGE_AUTO_RETRAIN=1` in the environment of whichever
+process runs `KnowledgeAdaptionAgent` (the `#116` hourly APScheduler
+job, the `MetaAgent` vote path, the `daily_ml_execute` circuit
+breaker, or a one-off CLI invocation) makes that agent spawn
+`python -m cron.monthly_ml_retrain` as a detached subprocess on the
+first `retrain` verdict. A SQLite stamp in `knowledge_stamps` dedups
+launches to **at most once per 24h** (tune via `KNOWLEDGE_RETRAIN_COOLDOWN`).
+Off by default. See `MAINTENANCE_AND_BROKERS.md` for operator notes.
+
 ---
 
 # Daily ML Signal Execution Cron

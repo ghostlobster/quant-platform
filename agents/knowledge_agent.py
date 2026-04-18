@@ -47,14 +47,21 @@ ENV vars
     KNOWLEDGE_STALE_DAYS        age > this → bearish / retrain (default 45)
     KNOWLEDGE_MONITOR_DAYS      age > this → neutral / monitor (default 35)
     KNOWLEDGE_ALERT_COOLDOWN    seconds between retrain alerts (default 86400)
+    KNOWLEDGE_AUTO_RETRAIN      1 → on a retrain verdict, spawn
+                                cron.monthly_ml_retrain in a detached
+                                subprocess (opt-in; default off)
+    KNOWLEDGE_RETRAIN_COOLDOWN  seconds between auto-retrain launches
+                                (default 86400)
 """
 from __future__ import annotations
 
 import json
 import os
 import pickle
+import subprocess  # noqa: S404 — used only with hard-coded argv (sys.executable + module name)
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -71,6 +78,8 @@ _IC_DROP_BEARISH = 0.5      # live_ic / trained_ic < this → retrain
 _IC_DROP_NEUTRAL = 0.75     # < this → monitor
 _CACHE_TTL_SEC = 60.0
 _DEFAULT_ALERT_COOLDOWN = 24 * 3600.0
+_DEFAULT_RETRAIN_COOLDOWN = 24 * 3600.0
+_AUTO_RETRAIN_STAMP = "retrain_fired_at"
 
 # Fed to MetaAgent / ml_execution so they can discount conviction without
 # changing direction.
@@ -199,6 +208,86 @@ def _read_trained_ic(model_name: str) -> float | None:
     return float(value) if value is not None else None
 
 
+def _read_stamp(name: str) -> float:
+    """Return ``last_fired_at`` for ``name`` from ``knowledge_stamps``.
+
+    Silently returns ``0.0`` if the table is missing or the DB is
+    unreachable — treats "no stamp" as "never fired" so the cooldown
+    gate opens.
+    """
+    try:
+        from data.db import get_connection
+    except Exception:
+        return 0.0
+    try:
+        conn = get_connection()
+    except Exception:
+        return 0.0
+    try:
+        row = conn.execute(
+            "SELECT last_fired_at FROM knowledge_stamps WHERE name = ?",
+            (name,),
+        ).fetchone()
+    except Exception:
+        return 0.0
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+    if row is None:
+        return 0.0
+    try:
+        value = row["last_fired_at"] if hasattr(row, "keys") else row[0]
+    except Exception:
+        return 0.0
+    return float(value) if value is not None else 0.0
+
+
+def _write_stamp(name: str, now: float) -> None:
+    """Upsert ``(name, now)`` into ``knowledge_stamps``.
+
+    Silently skips on any DB error — a missed stamp only risks one extra
+    retrain launch, which is safer than crashing the hot path.
+    """
+    try:
+        from data.db import get_connection
+    except Exception:
+        return
+    try:
+        conn = get_connection()
+    except Exception:
+        return
+    try:
+        with conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO knowledge_stamps "
+                "(name, last_fired_at) VALUES (?, ?)",
+                (name, now),
+            )
+    except Exception as exc:
+        logger.debug("knowledge_agent: stamp write failed", error=str(exc))
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def _watch_retrain_subprocess(proc: subprocess.Popen) -> None:
+    """Log the auto-retrain subprocess exit code off the agent's hot path."""
+    try:
+        rc = proc.wait()
+        logger.info(
+            "knowledge_agent: auto-retrain finished",
+            pid=proc.pid, exit_code=rc,
+        )
+    except Exception as exc:
+        logger.warning(
+            "knowledge_agent: auto-retrain watcher failed", error=str(exc),
+        )
+
+
 def _resolve_regime(context: dict) -> str | None:
     """Resolve the current regime from context or the cached live classifier."""
     regime = context.get("regime")
@@ -296,10 +385,14 @@ class KnowledgeAdaptionAgent:
     _clock = staticmethod(time.time)
     _coverage_reader = staticmethod(_read_regime_coverage)
     _metadata_reader = staticmethod(_read_trained_ic)
+    _popen = staticmethod(subprocess.Popen)
+    _retrain_reader = staticmethod(_read_stamp)
+    _retrain_writer = staticmethod(_write_stamp)
 
     def __init__(self) -> None:
         self._cache = _Cache()
         self._last_alert_at: float = 0.0
+        self._last_launch_alert_at: float = 0.0
 
     # ── Main entrypoint ────────────────────────────────────────────────────
 
@@ -363,8 +456,10 @@ class KnowledgeAdaptionAgent:
             plateau_detected=plateau_detected,
         )
 
+        auto_retrain_meta: dict[str, Any] | None = None
         if verdict["recommendation"] == "retrain":
             self._maybe_alert(verdict["reasoning"], now)
+            auto_retrain_meta = self._maybe_auto_retrain(verdict["reasoning"], now)
 
         metadata: dict[str, Any] = {
             "recommendation": verdict["recommendation"],
@@ -380,6 +475,8 @@ class KnowledgeAdaptionAgent:
             "at_risk": at_risk,
             "plateau_detected": plateau_detected,
         }
+        if auto_retrain_meta is not None:
+            metadata["auto_retrain"] = auto_retrain_meta
 
         return AgentSignal(
             agent_name=self.name,
@@ -483,7 +580,84 @@ class KnowledgeAdaptionAgent:
             )
             self._last_alert_at = now
         except Exception as exc:
-            logger.debug("knowledge_agent: alert dispatch failed: %s", exc)
+            logger.debug("knowledge_agent: alert dispatch failed", error=str(exc))
+
+    # ── Opt-in auto-retrain (#119) ────────────────────────────────────────
+
+    def _maybe_auto_retrain(
+        self, reason: str, now: float,
+    ) -> dict[str, Any] | None:
+        """Fire a detached ``cron.monthly_ml_retrain`` subprocess.
+
+        Opt-in via ``KNOWLEDGE_AUTO_RETRAIN`` (default off). Deduped across
+        process restarts via the ``knowledge_stamps`` SQLite table
+        (independent from the in-process alert cooldown so an alert can
+        fire while the launch is still throttled). Returns a dict that
+        the caller folds into ``AgentSignal.metadata`` so operators and
+        tests can inspect what happened. Non-blocking — the retrain
+        subprocess is detached and watched by a daemon thread.
+        """
+        if os.environ.get("KNOWLEDGE_AUTO_RETRAIN", "").strip().lower() not in (
+            "1", "true", "yes", "on",
+        ):
+            return None
+
+        cooldown = _env_float(
+            "KNOWLEDGE_RETRAIN_COOLDOWN", _DEFAULT_RETRAIN_COOLDOWN,
+        )
+        last = self._retrain_reader(_AUTO_RETRAIN_STAMP)
+        if (now - last) < cooldown:
+            return {
+                "auto_retrain": "throttled",
+                "seconds_until_next": round(cooldown - (now - last), 1),
+            }
+
+        try:
+            proc = self._popen(
+                [sys.executable, "-m", "cron.monthly_ml_retrain"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                close_fds=True,
+                start_new_session=True,
+            )
+        except Exception as exc:
+            logger.warning(
+                "knowledge_agent: auto-retrain launch failed", error=str(exc),
+            )
+            return {"auto_retrain": "failed", "error": str(exc)}
+
+        self._retrain_writer(_AUTO_RETRAIN_STAMP, now)
+        threading.Thread(
+            target=_watch_retrain_subprocess,
+            args=(proc,),
+            daemon=True,
+        ).start()
+        self._maybe_launch_alert(reason, proc.pid, now)
+        logger.info(
+            "knowledge_agent: auto-retrain launched",
+            pid=proc.pid, reason=reason,
+        )
+        return {"auto_retrain": "launched", "pid": proc.pid}
+
+    def _maybe_launch_alert(self, reason: str, pid: int, now: float) -> None:
+        """Alert operators with a distinct subject for auto-retrain launches."""
+        cooldown = _env_float(
+            "KNOWLEDGE_ALERT_COOLDOWN", _DEFAULT_ALERT_COOLDOWN,
+        )
+        if (now - self._last_launch_alert_at) < cooldown:
+            return
+        try:
+            from providers.alert import get_alert_channel
+            channel = get_alert_channel()
+            channel.send(
+                f"ML knowledge auto-retrain launched (pid={pid}): {reason}",
+                level="info",
+            )
+            self._last_launch_alert_at = now
+        except Exception as exc:
+            logger.debug(
+                "knowledge_agent: launch alert dispatch failed", error=str(exc),
+            )
 
 
 # ── Module helpers ─────────────────────────────────────────────────────────

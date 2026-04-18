@@ -438,4 +438,72 @@ Current coverage: 23%. The gap is almost entirely `app.py` (0%) and the newer `s
 
 ---
 
+## 11. Knowledge-Gating Operations
+
+The `KnowledgeAdaptionAgent` (`agents/knowledge_agent.py`) watches the
+freshness and IC of the LightGBM alpha model and produces a verdict in
+`{fresh, monitor, retrain}`. Three optional operator controls escalate
+the agent from advisory to automated:
+
+### 11.1 Pre-trade circuit breaker (#120)
+
+```
+python -m cron.daily_ml_execute --enforce-knowledge-gate
+KNOWLEDGE_GATE_ENFORCE=1  python -m cron.daily_ml_execute
+```
+
+On a `retrain` verdict the cron exits with code **2** before any order
+is placed. `fresh` / `monitor` proceed unchanged. The CLI flag wins
+over the env var when both are set.
+
+### 11.2 Scheduled knowledge health check (#116)
+
+`scheduler/alerts.py` hosts a `knowledge_health_job` registered on the
+APScheduler `BackgroundScheduler`. Runs hourly by default (override
+with `KNOWLEDGE_HEALTH_CRON`, disable with `KNOWLEDGE_HEALTH_ENABLED=0`).
+Ensures stale models are flagged even on quiet days when no trade flow
+would otherwise invoke the agent.
+
+### 11.3 Opt-in auto-retrain trigger (#119)
+
+**Default: off.** Set `KNOWLEDGE_AUTO_RETRAIN=1` in the environment of
+whichever process instantiates `KnowledgeAdaptionAgent` (the
+`knowledge_health_job`, the `MetaAgent` vote path, the
+`daily_ml_execute` circuit breaker, or a manual CLI run). When enabled
+and the verdict is `retrain`, the agent spawns
+
+```
+python -m cron.monthly_ml_retrain
+```
+
+as a **detached subprocess** (`Popen(..., start_new_session=True)`).
+The agent's hot path returns immediately — a daemon watcher thread
+logs the subprocess exit code via structlog, but nothing in the agent
+call graph blocks on the retrain.
+
+Launches are deduped by a SQLite row in `knowledge_stamps`
+(`name='retrain_fired_at'`), independent from the in-process alert
+cooldown. Default cooldown is 24h; override via
+`KNOWLEDGE_RETRAIN_COOLDOWN` (seconds).
+
+The launch emits an alert with a distinct subject (`"ML knowledge
+auto-retrain launched (pid=…): …"`) so operators can distinguish it
+from the existing stale-model alert (`"ML knowledge stale — retrain
+recommended: …"`).
+
+**Runtime risks and mitigations:**
+
+| Risk | Mitigation |
+|---|---|
+| Retrain subprocess uses `sys.executable` | Runs in the same venv as the caller — operators must ensure `lightgbm` is installed in that venv. |
+| Overlap with monthly cron (`0 7 1 * *`) | Safe — both write atomically via `MLSignal().train()`, and the 24h stamp prevents the agent from piling up. |
+| Retrain failure goes unnoticed | Watcher thread logs exit code at INFO level; production should aggregate structlog output. Non-zero exits do **not** currently trigger an alert (deferred). |
+| Stamp never cleared | Harmless — an old timestamp only makes the cooldown gate open sooner on the next retrain condition. |
+| Double-fire across two simultaneous `run()` calls | Extremely unlikely (microsecond window between stamp read and write). If it ever bites, upgrade the write to `INSERT ... ON CONFLICT DO UPDATE WHERE last_fired_at < excluded.last_fired_at`. |
+
+**Disabling:** unset `KNOWLEDGE_AUTO_RETRAIN` and restart the process.
+The stamp row remains but is ignored.
+
+---
+
 *Document generated: 2026-04-11 | Platform: `~/projects/quant-platform/` | See also: `TRADING_PHILOSOPHY.md`, `Quant_Living_Roadmap.docx`*
