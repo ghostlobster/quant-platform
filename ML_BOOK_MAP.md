@@ -96,7 +96,7 @@ graph LR
 | 10 — Bet Sizing                              | Kelly, dynamic allocation      |   ✅   | `risk/kelly.py`, `strategies/ml_execution.py`                   |
 | 11 — Dangers of Backtesting                  | deflated Sharpe, PBO           |   ✅   | `analysis/deflated_sharpe.py` (deflated_sharpe + probability_backtest_overfitting) |
 | 12 — Backtesting Through Cross-Validation    | combinatorial-purged CV        |   ✅   | `backtester/combinatorial_cv.py` (combinatorial_purged_cv + paths_dataframe) |
-| 13 — Backtesting on Synthetic Data           | bootstrap, GAN                 |   🟡   | bootstrap in `backtester/monte_carlo.py`; GAN out of scope      |
+| 13 — Backtesting on Synthetic Data           | bootstrap, GAN                 |   ✅   | bootstrap in `backtester/monte_carlo.py`; LSTM-GAN in `analysis/synthetic_paths.py` |
 | 14 — Backtest Statistics                     | Sharpe, Sortino, MAR           |   ✅   | `analysis/risk_metrics.py`, `backtester/engine.py`              |
 | 15 — Understanding Strategy Risk             | efficient frontier, VaR        |   ✅   | `risk/markowitz.py`, `risk/var.py`                              |
 | 16 — ML Asset Allocation                     | Hierarchical Risk Parity       |   ✅   | `risk/hrp.py` (quasi-diag + recursive bisection)                 |
@@ -128,7 +128,7 @@ graph LR
 | 18 — CNNs                                    | image / chart patterns         |   ✅   | `analysis/chart_images.py` (GAF + OHLC raster) + `strategies/cnn_signal.py` (Conv2d alpha) |
 | 19 — RNNs / LSTM                             | sequence models                |   ✅   | `strategies/dl_signal.py` (_LSTMRegressor + windowed training)  |
 | 20 — Autoencoders                            | conditional risk factors       |   ✅   | `analysis/risk_autoencoder.py` (train_autoencoder + latent_factors + reconstruction_error) |
-| 21 — GANs                                    | synthetic time series          |   ⏳   | deferred                                                        |
+| 21 — GANs                                    | synthetic time series          |   ✅   | `analysis/synthetic_paths.py` (LSTM-GAN train_generator + sample_paths) |
 | 22 — Deep Reinforcement Learning             | trading agent                  |   ✅   | `strategies/drl_agent.py` (TradingEnv + PPO DRLAgent); `analysis/rl_sizer.py` handles sizing-only RL |
 
 Legend: ✅ implemented · 🟡 partial · ⏳ planned (issue) · _blank_ deferred.
