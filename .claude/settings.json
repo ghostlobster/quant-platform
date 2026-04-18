@@ -25,6 +25,10 @@
       "Bash(docker compose ps)"
     ]
   },
+  "env": {
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHONUNBUFFERED": "1"
+  },
   "hooks": {
     "SessionStart": [
       {

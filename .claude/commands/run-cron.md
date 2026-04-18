@@ -1,6 +1,7 @@
 ---
 description: Manually run a cron job (cron.daily_ml_execute or cron.monthly_ml_retrain) locally with optional ticker override, and summarise the structured log output. Delegates to the `cron-runner` subagent so training/trade logs stay out of the main context.
 argument-hint: daily|monthly [TICKER1,TICKER2,...]
+tools: []
 ---
 
 Delegate to the `cron-runner` subagent with the parsed arguments. This keeps

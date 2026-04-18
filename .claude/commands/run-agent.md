@@ -1,6 +1,7 @@
 ---
 description: Invoke a specialist trading agent (regime, risk, sentiment, screener, execution, knowledge) or the meta-agent with a ticker context, and display the AgentSignal. Delegates to the `trading-agent-runner` subagent so large JSON payloads stay out of the main context.
 argument-hint: <agent_name> <ticker>
+tools: []
 ---
 
 Delegate to the `trading-agent-runner` subagent with the parsed arguments.
