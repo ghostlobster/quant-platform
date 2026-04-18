@@ -399,3 +399,52 @@ def test_at_risk_does_not_override_retrain(model_paths, isolate_metadata):
     )
     assert sig.signal == "bearish"
     assert sig.metadata["recommendation"] == "retrain"
+
+
+# ── IC plateau demotion (#122) ────────────────────────────────────────────────
+
+def test_plateau_demotes_fresh_to_monitor(model_paths, isolate_metadata):
+    baseline, regime = model_paths
+    _write_pickle(baseline, {"model": object()}, age_seconds=60)
+    _write_pickle(
+        regime, {"models": {"trending_bull": 1, "trending_bear": 1,
+                             "mean_reverting": 1, "high_vol": 1}}, age_seconds=60,
+    )
+    # Would normally be fresh; plateau demotes to monitor.
+    sig = KnowledgeAdaptionAgent().run(
+        {"regime": "trending_bull", "plateau_detected": True}
+    )
+    assert sig.signal == "neutral"
+    assert sig.metadata["recommendation"] == "monitor"
+    assert sig.metadata["plateau_detected"] is True
+    assert "plateau" in sig.reasoning.lower()
+
+
+def test_plateau_false_keeps_fresh(model_paths, isolate_metadata):
+    baseline, regime = model_paths
+    _write_pickle(baseline, {"model": object()}, age_seconds=60)
+    _write_pickle(
+        regime, {"models": {"trending_bull": 1, "trending_bear": 1,
+                             "mean_reverting": 1, "high_vol": 1}}, age_seconds=60,
+    )
+    sig = KnowledgeAdaptionAgent().run(
+        {"regime": "trending_bull", "plateau_detected": False}
+    )
+    assert sig.signal == "bullish"
+    assert sig.metadata["recommendation"] == "fresh"
+    assert sig.metadata["plateau_detected"] is False
+
+
+def test_plateau_does_not_override_retrain(model_paths, isolate_metadata):
+    # Stale baseline trumps plateau — still a hard retrain
+    baseline, regime = model_paths
+    days = 60 * 86400
+    _write_pickle(baseline, {"model": object()}, age_seconds=days)
+    _write_pickle(
+        regime, {"models": {"trending_bull": 1, "trending_bear": 1,
+                             "mean_reverting": 1, "high_vol": 1}}, age_seconds=days,
+    )
+    sig = KnowledgeAdaptionAgent().run(
+        {"regime": "trending_bull", "plateau_detected": True}
+    )
+    assert sig.metadata["recommendation"] == "retrain"
