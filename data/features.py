@@ -15,6 +15,8 @@ Input features (cross-sectionally z-scored across tickers per date):
     realised_vol_21d                       — annualised realised volatility (21d)
     vol_ratio_20d                          — Volume / 20-day rolling mean Volume
     vol_zscore_20d                         — (Volume − mean) / std over 20-day window
+    vpin_50d                               — Volume-Synchronized PIN via BVC over 50 bars
+    kyle_lambda_21d                        — Rolling Kyle's λ (price-impact coefficient)
 
 Forward return targets (NOT z-scored; NaN for last n rows of each ticker):
     fwd_ret_1d, fwd_ret_5d, fwd_ret_10d, fwd_ret_21d
@@ -43,6 +45,7 @@ _FEATURE_COLS = [
     "ret_1d", "ret_5d", "ret_10d", "ret_21d",
     "skew_21d", "kurt_21d", "autocorr_1", "realised_vol_21d",
     "vol_ratio_20d", "vol_zscore_20d",
+    "vpin_50d", "kyle_lambda_21d",
 ]
 _FWD_COLS = ["fwd_ret_1d", "fwd_ret_5d", "fwd_ret_10d", "fwd_ret_21d"]
 _TB_LABEL_COLS = ["tb_bin", "tb_ret", "tb_target", "tb_t1"]
@@ -89,6 +92,12 @@ def _single_ticker_features(
     vol_std = volume.rolling(20).std()
     out["vol_ratio_20d"] = volume / vol_mean
     out["vol_zscore_20d"] = (volume - vol_mean) / vol_std.replace(0, np.nan)
+
+    # ── Microstructural features (AFML Ch 19) ─────────────────────────────────
+    from analysis.microstructure import kyle_lambda, vpin
+
+    out["vpin_50d"] = vpin(close, volume, window=50)
+    out["kyle_lambda_21d"] = kyle_lambda(close, volume, window=21)
 
     # ── Forward return labels (shift(-n) so label sits on the entry date) ─────
     for n in (1, 5, 10, 21):

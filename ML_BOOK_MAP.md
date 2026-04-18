@@ -26,6 +26,7 @@ graph LR
         F3[analysis/triple_barrier.py<br/>PT/SL/vertical labels]
         F4[data/frac_diff.py<br/>fractional diff]
         F5[data/sentiment.py + adapters<br/>Vader / StockTwits]
+        F6[analysis/microstructure.py<br/>VPIN + Kyle λ]
     end
 
     subgraph Models[Models]
@@ -54,12 +55,13 @@ graph LR
         E4[cron/monthly_ml_retrain.py]
     end
 
-    AFML --> F3 & F4 & M4 & M5 & B1 & B4 & B8
+    AFML --> F3 & F4 & F6 & M4 & M5 & B1 & B4 & B8
     ML4T --> F1 & F2 & F5 & M1 & M2 & M3 & M5 & B2 & B3 & B5 & B6 & B7
 
     F1 --> M1 & M2
     F3 --> M4
     F4 --> F1
+    F6 --> F1
     M1 --> B1 --> B2
     M4 --> B2
     M5 --> M1
@@ -72,7 +74,7 @@ graph LR
 
     classDef done fill:#d5f5e3,stroke:#229954,color:#154360
     classDef planned fill:#fdebd0,stroke:#b9770e,color:#7e5109
-    class F1,F2,F3,F4,F5,M1,M2,M3,M4,M5,B1,B2,B3,B4,B5,B6,B7,B8,E1,E2,E3,E4 done
+    class F1,F2,F3,F4,F5,F6,M1,M2,M3,M4,M5,B1,B2,B3,B4,B5,B6,B7,B8,E1,E2,E3,E4 done
 ```
 
 ---
@@ -100,7 +102,7 @@ graph LR
 | 16 — ML Asset Allocation                     | Hierarchical Risk Parity       |   ✅   | `risk/hrp.py` (quasi-diag + recursive bisection)                 |
 | 17 — Structural Breaks                       | CUSUM, Chow tests              |   ✅   | `analysis/structural_breaks.py` (cusum_events + cusum_events_from_prices) |
 | 18 — Entropy Features                        | Shannon / plug-in / K-L        |   ✅   | `analysis/entropy_features.py` (plug_in, lempel_ziv, konto) |
-| 19 — Microstructural Features                | VPIN, Kyle λ                   |   ⏳   | _planned_ — see issue "Microstructural features"                |
+| 19 — Microstructural Features                | VPIN, Kyle λ                   |   ✅   | `analysis/microstructure.py` (bvc_buy_fraction + vpin + kyle_lambda) |
 
 ### Jansen — *Machine Learning for Algorithmic Trading*
 

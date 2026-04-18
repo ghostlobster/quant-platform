@@ -183,3 +183,29 @@ def test_realised_vol_is_finite():
 
     valid = fm["realised_vol_21d"].dropna()
     assert np.isfinite(valid).all(), "Z-scored realised vol contains non-finite values"
+
+
+def test_microstructural_columns_present_and_z_scored():
+    """vpin_50d and kyle_lambda_21d appear in the matrix and are cross-sectionally z-scored."""
+    tickers = ["AAPL", "MSFT", "GOOGL", "AMZN", "META"]
+    with patch("data.features.fetch_ohlcv", side_effect=_mock_fetch):
+        fm = build_feature_matrix(tickers, period="2y")
+
+    assert "vpin_50d" in fm.columns
+    assert "kyle_lambda_21d" in fm.columns
+
+    date_counts = fm.groupby(level="date").size()
+    full_dates = date_counts[date_counts == len(tickers)].index
+    if len(full_dates) == 0:
+        pytest.skip("No date with all tickers — skip z-score check")
+
+    sample_date = full_dates[len(full_dates) // 2]
+    group = fm.xs(sample_date, level="date")
+
+    for col in ("vpin_50d", "kyle_lambda_21d"):
+        col_vals = group[col].dropna()
+        if len(col_vals) >= 3:
+            assert abs(col_vals.mean()) < 0.5, (
+                f"Cross-sectional mean of {col} on {sample_date} = {col_vals.mean():.4f}, "
+                "expected near 0 after z-scoring"
+            )
