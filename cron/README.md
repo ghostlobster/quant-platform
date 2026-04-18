@@ -131,14 +131,41 @@ Run at 16:05 ET (post-close) on weekdays:
 
 ## Environment variables
 
-| Variable              | Default                    | Description                                           |
-|-----------------------|----------------------------|-------------------------------------------------------|
-| WF_TICKERS            | SPY,QQQ,AAPL,MSFT,TSLA    | Comma-separated tickers to score                       |
-| ML_SCORE_THRESHOLD    | 0.3                        | Minimum |score| required to act                         |
-| ML_MAX_POSITIONS      | 5                          | Maximum simultaneous long positions                    |
-| BROKER_PROVIDER       | paper                      | paper / alpaca / ibkr / schwab (routed via providers/) |
-| LGBM_ALPHA_MODEL_PATH | models/lgbm_alpha.pkl      | Path to the trained model checkpoint                   |
+| Variable                | Default                    | Description                                           |
+|-------------------------|----------------------------|-------------------------------------------------------|
+| WF_TICKERS              | SPY,QQQ,AAPL,MSFT,TSLA    | Comma-separated tickers to score                       |
+| ML_SCORE_THRESHOLD      | 0.3                        | Minimum \|score\| required to act                      |
+| ML_MAX_POSITIONS        | 5                          | Maximum simultaneous long positions                    |
+| BROKER_PROVIDER         | paper                      | paper / alpaca / ibkr / schwab (routed via providers/) |
+| LGBM_ALPHA_MODEL_PATH   | models/lgbm_alpha.pkl      | Path to the trained model checkpoint                   |
+| KNOWLEDGE_GATE_ENFORCE  | (unset)                    | When `1`, same as passing `--enforce-knowledge-gate`   |
 
 Position sizes are computed as `equity × Kelly × regime_mult × |score|`, where
 Kelly uses the priors `ML_KELLY_WIN_RATE` (0.55), `ML_KELLY_AVG_WIN` (0.03),
 `ML_KELLY_AVG_LOSS` (0.02). Regime multiplier halves size in `high_vol`.
+
+## Pre-trade circuit breaker
+
+Optional flag that refuses to place orders when `KnowledgeAdaptionAgent`
+returns a `retrain` verdict — intended for production so stale models do
+not silently bleed P&L:
+
+```bash
+python -m cron.daily_ml_execute --enforce-knowledge-gate
+# or equivalently
+KNOWLEDGE_GATE_ENFORCE=1 python -m cron.daily_ml_execute
+```
+
+The CLI flag wins over the env var when both are set (use
+`--no-enforce-knowledge-gate` to explicitly disable). Verdicts:
+
+| Verdict    | Behaviour                                                |
+|------------|----------------------------------------------------------|
+| `fresh`    | Proceeds normally.                                       |
+| `monitor`  | Proceeds normally; agent logs the reason.                |
+| `retrain`  | **Exits with code 2** before any order is placed.        |
+
+Exit codes emitted by the job: `0` success, `1` fatal error (missing
+lightgbm, no trained model, unexpected exception), `2` knowledge gate
+tripped. The agent's own 24h alert cooldown dedupes alerts so the cron
+does not spam on every run.
