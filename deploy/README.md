@@ -39,6 +39,15 @@ supervisorctl restart all      # restart everything
 supervisorctl tail -f quant-streamlit   # follow logs
 ```
 
+### Gated Daily ML Execution (opt-in)
+
+`supervisord.conf` ships a commented-out `[program:ml-execute-gated]` block
+that runs `cron/daily_ml_execute.py --enforce-knowledge-gate`. Uncomment
+it to refuse orders when `KnowledgeAdaptionAgent` returns a `retrain`
+verdict (exit code `2`); `fresh` / `monitor` proceed normally. Use this
+in production so stale models never trade live — see `cron/README.md`
+for full semantics and exit codes.
+
 ### Nginx Reverse Proxy (optional)
 ```nginx
 server {

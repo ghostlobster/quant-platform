@@ -13,6 +13,20 @@ Schedule (16:05 ET on weekdays):
     5 16 * * 1-5 cd /path/to/quant-platform && \\
         .venv/bin/python -m cron.daily_ml_execute
 
+Optional circuit breaker — fail closed when ML knowledge is stale:
+    python -m cron.daily_ml_execute --enforce-knowledge-gate
+    KNOWLEDGE_GATE_ENFORCE=1 python -m cron.daily_ml_execute
+
+    When the gate is on and ``KnowledgeAdaptionAgent`` returns a
+    ``retrain`` verdict, the cron exits with code ``2`` before any order is
+    placed. ``fresh`` / ``monitor`` verdicts proceed unchanged. The CLI flag
+    wins over the env var when both are set.
+
+Exit codes:
+    0 — success (trades placed or no-op).
+    1 — fatal error (lightgbm missing, no trained model, unexpected exception).
+    2 — circuit breaker tripped on retrain verdict.
+
 ENV vars
 --------
     WF_TICKERS             Comma-separated tickers (default: SPY,QQQ,AAPL,MSFT,TSLA)
@@ -20,9 +34,11 @@ ENV vars
     ML_MAX_POSITIONS       Maximum simultaneous longs (default: 5)
     BROKER_PROVIDER        paper | alpaca | ibkr | schwab (default: paper)
     LGBM_ALPHA_MODEL_PATH  Path to the trained model checkpoint
+    KNOWLEDGE_GATE_ENFORCE 1 → same as passing --enforce-knowledge-gate
 """
 from __future__ import annotations
 
+import argparse
 import os
 import sys
 
@@ -34,8 +50,73 @@ log = get_logger("cron.daily_ml_execute")
 
 DEFAULT_TICKERS = "SPY,QQQ,AAPL,MSFT,TSLA"
 
+EXIT_OK = 0
+EXIT_FATAL = 1
+EXIT_KNOWLEDGE_GATE = 2
 
-def main() -> None:
+
+def _build_arg_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="cron.daily_ml_execute",
+        description="Daily ML signal execution cron job.",
+    )
+    parser.add_argument(
+        "--enforce-knowledge-gate",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=(
+            "Refuse to place any order when KnowledgeAdaptionAgent returns a "
+            "retrain verdict (exit code 2). When unset the job falls back to "
+            "the KNOWLEDGE_GATE_ENFORCE env var; the flag wins on conflict."
+        ),
+    )
+    return parser
+
+
+def _resolve_gate_enforcement(flag: bool | None) -> bool:
+    """CLI flag wins when explicitly set; otherwise consult env var."""
+    if flag is not None:
+        return flag
+    return os.environ.get("KNOWLEDGE_GATE_ENFORCE", "").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+
+
+def _check_knowledge_gate() -> int | None:
+    """Run KnowledgeAdaptionAgent and return an exit code when it blocks.
+
+    Returns ``None`` when the verdict is fresh/monitor (proceed). Returns
+    ``EXIT_KNOWLEDGE_GATE`` (2) when the verdict is ``retrain``.
+    """
+    try:
+        from agents.knowledge_agent import KnowledgeAdaptionAgent
+    except ImportError as exc:
+        log.error("daily_ml_execute: knowledge agent unavailable", error=str(exc))
+        return EXIT_KNOWLEDGE_GATE
+
+    sig = KnowledgeAdaptionAgent().run({})
+    recommendation = (sig.metadata or {}).get("recommendation", "fresh")
+    log.info(
+        "daily_ml_execute: knowledge-gate verdict",
+        recommendation=recommendation,
+        reasoning=sig.reasoning,
+    )
+    if recommendation == "retrain":
+        log.error(
+            "daily_ml_execute: knowledge gate tripped — refusing to trade",
+            recommendation=recommendation,
+            reasoning=sig.reasoning,
+        )
+        return EXIT_KNOWLEDGE_GATE
+    return None
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = _build_arg_parser()
+    args = parser.parse_args(argv)
+
+    enforce_gate = _resolve_gate_enforcement(args.enforce_knowledge_gate)
+
     tickers_str = os.environ.get("WF_TICKERS", DEFAULT_TICKERS)
     tickers = [t.strip() for t in tickers_str.split(",") if t.strip()]
     threshold = float(os.environ.get("ML_SCORE_THRESHOLD", "0.3"))
@@ -48,11 +129,17 @@ def main() -> None:
         threshold=threshold,
         max_positions=max_positions,
         broker=broker_name,
+        enforce_knowledge_gate=enforce_gate,
     )
 
     if not _LGBM_AVAILABLE:
         log.error("daily_ml_execute: lightgbm is not installed — aborting")
-        sys.exit(1)
+        sys.exit(EXIT_FATAL)
+
+    if enforce_gate:
+        gate_exit = _check_knowledge_gate()
+        if gate_exit is not None:
+            sys.exit(gate_exit)
 
     try:
         model = MLSignal()
@@ -61,7 +148,7 @@ def main() -> None:
                 "daily_ml_execute: no trained baseline model found — "
                 "run cron.monthly_ml_retrain first"
             )
-            sys.exit(1)
+            sys.exit(EXIT_FATAL)
 
         scores = model.predict(tickers, period="6mo")
         log.info("daily_ml_execute: scored", n_scores=len(scores))
@@ -80,7 +167,7 @@ def main() -> None:
 
     except Exception as exc:
         log.error("daily_ml_execute: unexpected failure", error=str(exc))
-        sys.exit(1)
+        sys.exit(EXIT_FATAL)
 
 
 if __name__ == "__main__":
