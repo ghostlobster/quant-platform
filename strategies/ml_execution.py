@@ -55,6 +55,39 @@ def _current_regime() -> str:
         return "trending_bull"
 
 
+def _knowledge_gate(regime: str) -> tuple[float, str, bool]:
+    """Ask the KnowledgeAdaptionAgent whether the pickled models are fit to trade.
+
+    Returns ``(multiplier, recommendation, skip_all)``.  ``skip_all`` is True
+    when the baseline pickle is missing entirely — without a model we should
+    not place trades even if a caller passed in synthetic scores.
+    """
+    try:
+        from agents.knowledge_agent import KnowledgeAdaptionAgent, recommendation_multiplier
+    except Exception as exc:
+        log.debug("ml_execution: knowledge agent import failed", error=str(exc))
+        return 1.0, "fresh", False
+
+    try:
+        sig = KnowledgeAdaptionAgent().run({"regime": regime})
+    except Exception as exc:
+        log.debug("ml_execution: knowledge agent run failed", error=str(exc))
+        return 1.0, "fresh", False
+
+    meta = sig.metadata or {}
+    rec = str(meta.get("recommendation") or "fresh")
+    mult = recommendation_multiplier(rec)
+    skip_all = bool(rec == "retrain" and meta.get("baseline_age_days") is None)
+    if rec != "fresh":
+        log.warning(
+            "ml_execution: knowledge gate",
+            recommendation=rec,
+            multiplier=mult,
+            reason=sig.reasoning,
+        )
+    return mult, rec, skip_all
+
+
 def _size_order(
     equity: float,
     price: float,
@@ -161,6 +194,14 @@ def execute_ml_signals(
     kelly_base = _kelly_baseline()
     regime = _current_regime()
     regime_mult = kelly_regime_multiplier(regime)
+    knowledge_mult, knowledge_rec, skip_all = _knowledge_gate(regime)
+    if skip_all:
+        log.warning(
+            "ml_execution: skipping all buys — baseline model missing",
+            recommendation=knowledge_rec,
+        )
+        return actions
+    kelly_base *= knowledge_mult
 
     # Enter new long positions sized by Kelly × regime × |score|.
     for ticker, score in long_candidates:

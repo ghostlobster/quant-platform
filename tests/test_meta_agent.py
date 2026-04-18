@@ -136,3 +136,65 @@ def test_meta_agent_weighted_score_and_reasoning_present():
     assert "reasoning" in result
     assert isinstance(result["reasoning"], str)
     assert len(result["reasoning"]) > 0
+
+
+# ── KnowledgeAdaptionAgent gate ────────────────────────────────────────────
+
+def _make_knowledge_agent(recommendation: str):
+    from unittest.mock import MagicMock
+
+    agent = MagicMock()
+    agent.name = "knowledge_agent"
+    agent.run.return_value = AgentSignal(
+        agent_name="knowledge_agent",
+        signal="neutral",
+        confidence=0.5,
+        reasoning=f"models {recommendation}",
+        metadata={"recommendation": recommendation},
+    )
+    return agent
+
+
+def test_meta_agent_knowledge_multiplier_fresh_is_one():
+    from agents.meta_agent import MetaAgent
+
+    agents = [
+        _make_mock_agent("regime_agent", "bullish", 0.8),
+        _make_knowledge_agent("fresh"),
+    ]
+    result = MetaAgent(agents=agents).run({"ticker": "AAPL"})
+    assert result["signal"] == "bullish"
+    assert result["knowledge_multiplier"] == 1.0
+
+
+def test_meta_agent_knowledge_retrain_scales_confidence():
+    from agents.meta_agent import MetaAgent
+
+    agents = [
+        _make_mock_agent("regime_agent", "bullish", 0.8),
+        _make_knowledge_agent("retrain"),
+    ]
+    result = MetaAgent(agents=agents).run({"ticker": "AAPL"})
+    # Direction is preserved, confidence is discounted by the 0.4 multiplier.
+    assert result["signal"] == "bullish"
+    assert result["knowledge_multiplier"] == 0.4
+    # No regression: a fresh-knowledge run would produce a strictly higher
+    # confidence than this retrain run.
+    fresh_agents = [
+        _make_mock_agent("regime_agent", "bullish", 0.8),
+        _make_knowledge_agent("fresh"),
+    ]
+    fresh_result = MetaAgent(agents=fresh_agents).run({"ticker": "AAPL"})
+    assert fresh_result["confidence"] > result["confidence"]
+
+
+def test_meta_agent_knowledge_monitor_reason_appended():
+    from agents.meta_agent import MetaAgent
+
+    agents = [
+        _make_mock_agent("regime_agent", "bullish", 0.8),
+        _make_knowledge_agent("monitor"),
+    ]
+    result = MetaAgent(agents=agents).run({"ticker": "AAPL"})
+    assert "knowledge:monitor" in result["reasoning"]
+    assert result["knowledge_multiplier"] == 0.7

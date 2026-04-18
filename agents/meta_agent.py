@@ -30,6 +30,10 @@ _DEFAULT_WEIGHTS: dict[str, float] = {
     "sentiment_agent": 0.8,
     "screener_agent": 1.0,
     "execution_agent": 0.5,
+    # KnowledgeAdaptionAgent is a governance gate, not a directional opinion.
+    # Weight 0 keeps it out of the vote; its recommendation scales the
+    # aggregated confidence below (see `knowledge_multiplier`).
+    "knowledge_agent": 0.0,
 }
 
 _SIGNAL_SCORES = {"bullish": 1.0, "neutral": 0.0, "bearish": -1.0}
@@ -63,11 +67,19 @@ class MetaAgent:
     ) -> None:
         if agents is None:
             from agents.execution_agent import ExecutionAgent
+            from agents.knowledge_agent import KnowledgeAdaptionAgent
             from agents.regime_agent import RegimeAgent
             from agents.risk_agent import RiskAgent
             from agents.screener_agent import ScreenerAgent
             from agents.sentiment_agent import SentimentAgent
-            agents = [RegimeAgent(), RiskAgent(), SentimentAgent(), ScreenerAgent(), ExecutionAgent()]
+            agents = [
+                RegimeAgent(),
+                RiskAgent(),
+                SentimentAgent(),
+                ScreenerAgent(),
+                ExecutionAgent(),
+                KnowledgeAdaptionAgent(),
+            ]
         self._agents: list[AgentProvider] = agents
         self._weights = weights or _load_weights()
 
@@ -123,7 +135,28 @@ class MetaAgent:
             consensus = "neutral"
 
         confidence = min(1.0, abs(weighted_score))
+
+        # Governance gate: if the KnowledgeAdaptionAgent is in the mix, let its
+        # recommendation scale confidence without perturbing direction. Stale
+        # models shouldn't flip signals, just reduce conviction (and, via
+        # strategies/ml_execution.py, position sizing).
+        knowledge_multiplier = 1.0
+        knowledge_reason: str | None = None
+        for sig in signals:
+            if sig.agent_name != "knowledge_agent":
+                continue
+            rec = (sig.metadata or {}).get("recommendation")
+            if rec in ("fresh", "monitor", "retrain"):
+                from agents.knowledge_agent import recommendation_multiplier
+                knowledge_multiplier = recommendation_multiplier(rec)
+                if rec != "fresh":
+                    knowledge_reason = f"knowledge:{rec} ({sig.reasoning})"
+            break
+        confidence = round(min(1.0, confidence * knowledge_multiplier), 4)
+
         reasoning = f"Weighted score={weighted_score:+.3f} → {consensus}"
+        if knowledge_reason is not None:
+            reasoning = f"{reasoning} | {knowledge_reason}"
 
         # Optional LLM arbitration for close calls
         if os.environ.get("AGENT_LLM_ARBITER", "0") == "1" and abs(weighted_score) < 0.3:
@@ -137,6 +170,7 @@ class MetaAgent:
             "signal": consensus,
             "confidence": round(confidence, 4),
             "weighted_score": round(weighted_score, 4),
+            "knowledge_multiplier": round(knowledge_multiplier, 4),
             "specialist_signals": [
                 {
                     "agent": s.agent_name,
