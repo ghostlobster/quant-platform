@@ -1,6 +1,6 @@
 ---
 name: cron-runner
-description: Run one of the ML cron jobs (cron.daily_ml_execute or cron.monthly_ml_retrain) locally with optional ticker override, and return a compact summary of the structured log output. Use when the caller wants to trigger a cron job without flooding the main context with training/trade logs.
+description: Run one of the ML cron jobs (cron.daily_ml_execute, cron.monthly_ml_retrain, or the scheduler.alerts knowledge_health_job) locally with optional ticker override, and return a compact summary of the structured log output. Use when the caller wants to trigger a cron job without flooding the main context with training/trade logs.
 tools: Bash, Read
 ---
 
@@ -10,13 +10,13 @@ structured log line. You do NOT commit, push, tag, or modify `cron/` or
 
 ## Input
 
-- `mode`: `daily` or `monthly`.
+- `mode`: `daily`, `monthly`, or `knowledge-health`.
 - `tickers` (optional): comma-separated list. If present, export
   `WF_TICKERS=<value>` **for the subprocess only** — do not mutate any
-  persistent shell state.
+  persistent shell state. Ignored for `knowledge-health`.
 
 Reject any other `mode` with the usage line:
-`cron-runner <daily|monthly> [TICKER1,TICKER2,...]`.
+`cron-runner <daily|monthly|knowledge-health> [TICKER1,TICKER2,...]`.
 
 ## Dispatch
 
@@ -24,8 +24,9 @@ Reject any other `mode` with the usage line:
 |---|---|---|
 | `daily` | `python -m cron.daily_ml_execute` | `cron/daily_ml_execute.py` |
 | `monthly` | `python -m cron.monthly_ml_retrain` | `cron/monthly_ml_retrain.py` |
+| `knowledge-health` | `python -c "from scheduler.alerts import knowledge_health_job; import json; print(json.dumps(knowledge_health_job(), default=str))"` | `scheduler/alerts.py:knowledge_health_job` |
 
-Both commands are pre-approved in `.claude/settings.json`.
+All three commands are pre-approved in `.claude/settings.json`.
 
 ## Pre-flight (daily only)
 

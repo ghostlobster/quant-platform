@@ -169,3 +169,52 @@ Exit codes emitted by the job: `0` success, `1` fatal error (missing
 lightgbm, no trained model, unexpected exception), `2` knowledge gate
 tripped. The agent's own 24h alert cooldown dedupes alerts so the cron
 does not spam on every run.
+
+---
+
+# Knowledge Health Job (push-based verdict)
+
+Runs `KnowledgeAdaptionAgent().run({})` on a cron schedule so staleness is
+detected even on quiet days (no votes, no trade flow). Exposed as
+`scheduler.alerts.knowledge_health_job` and scheduled via
+`scheduler.alerts.start_knowledge_health_scheduler` (APScheduler
+`BackgroundScheduler`). The agent's own 24h alert cooldown dedupes
+retrain alerts, so scheduling hourly does **not** spam operators.
+
+## Opt-in in the app
+
+The Streamlit bootstrap starts the scheduler only when
+`ENABLE_KNOWLEDGE_HEALTH_JOB=1`, so dev sessions do not get surprise
+background jobs:
+
+```bash
+ENABLE_KNOWLEDGE_HEALTH_JOB=1 streamlit run app.py
+```
+
+## Manual run (one-shot)
+
+```bash
+python -c "from scheduler.alerts import knowledge_health_job; knowledge_health_job()"
+# or, via the slash command
+/run-cron knowledge-health
+```
+
+The Claude Code `/run-cron knowledge-health` dispatches to the
+`cron-runner` subagent which emits the compact verdict summary.
+
+## Environment variables
+
+| Variable                      | Default         | Description                                        |
+|-------------------------------|-----------------|----------------------------------------------------|
+| `ENABLE_KNOWLEDGE_HEALTH_JOB` | (unset)         | `1` → app bootstrap starts the scheduler           |
+| `KNOWLEDGE_HEALTH_ENABLED`    | `1`             | Kill-switch — set `0` to skip without re-deploy     |
+| `KNOWLEDGE_HEALTH_CRON`       | `0 * * * *`     | Crontab-style schedule (top of every hour)         |
+| `KNOWLEDGE_ALERT_COOLDOWN`    | `86400`         | Seconds between retrain alerts (inherited)         |
+
+## Verdict → log level
+
+| Recommendation | Log level | Structured payload                                      |
+|----------------|-----------|---------------------------------------------------------|
+| `fresh`        | INFO      | `recommendation, signal, confidence, reasoning`         |
+| `monitor`      | INFO      | same                                                    |
+| `retrain`      | WARNING   | same (agent fires its own alert with 24h cooldown)      |

@@ -492,3 +492,101 @@ def run_anomaly_checks(
         fired.append(anomaly)
 
     return fired
+
+
+# ── Knowledge-adaption health check scheduler hook ────────────────────────────
+
+# Shared agent instance so the 24h alert cooldown (_last_alert_at on the
+# agent) actually throttles across scheduled runs. Used by
+# ``knowledge_health_job`` and injectable from tests.
+_knowledge_agent_singleton = None
+
+
+def _get_knowledge_agent():
+    """Return (lazy) the process-wide KnowledgeAdaptionAgent singleton."""
+    global _knowledge_agent_singleton
+    if _knowledge_agent_singleton is None:
+        from agents.knowledge_agent import KnowledgeAdaptionAgent
+
+        _knowledge_agent_singleton = KnowledgeAdaptionAgent()
+    return _knowledge_agent_singleton
+
+
+def knowledge_health_job() -> dict:
+    """Run the KnowledgeAdaptionAgent once and emit a structured log line.
+
+    Intended for APScheduler — see ``start_knowledge_health_scheduler``. The
+    agent's own 24h alert stamp (``_last_alert_at``) dedupes retrain alerts
+    so scheduling the job hourly does not spam operators.
+
+    Returns the agent's ``metadata`` dict so the caller can introspect the
+    verdict (useful in tests and for the ``/run-cron knowledge-health``
+    slash command).
+    """
+    agent = _get_knowledge_agent()
+    sig = agent.run({})
+    recommendation = (sig.metadata or {}).get("recommendation", "monitor")
+    log_fn = logger.warning if recommendation == "retrain" else logger.info
+    log_fn(
+        "knowledge_health_job: verdict",
+        recommendation=recommendation,
+        signal=sig.signal,
+        confidence=sig.confidence,
+        reasoning=sig.reasoning,
+    )
+    return dict(sig.metadata or {})
+
+
+def start_knowledge_health_scheduler(
+    cron_expr: str | None = None,
+    paused: bool = False,
+):
+    """Build a ``BackgroundScheduler`` that runs ``knowledge_health_job``
+    on a cron schedule.
+
+    Parameters
+    ----------
+    cron_expr : crontab-style schedule. Defaults to ``KNOWLEDGE_HEALTH_CRON``
+                env var, falling back to ``"0 * * * *"`` (top of every hour).
+    paused    : start the scheduler in paused state — useful for tests that
+                only want to inspect the registered jobs without actually
+                firing them.
+
+    Returns
+    -------
+    The started ``BackgroundScheduler`` instance, or ``None`` when
+    ``KNOWLEDGE_HEALTH_ENABLED`` is explicitly set to ``0`` / ``false``.
+
+    Operators opt in via ``ENABLE_KNOWLEDGE_HEALTH_JOB=1`` in the app
+    bootstrap; ``KNOWLEDGE_HEALTH_ENABLED`` is a per-scheduler kill-switch
+    for quickly disabling the job without re-deploying.
+    """
+    import os as _os
+
+    enabled = _os.environ.get("KNOWLEDGE_HEALTH_ENABLED", "1").strip().lower()
+    if enabled in ("0", "false", "no", "off"):
+        logger.info("knowledge_health_job: disabled via KNOWLEDGE_HEALTH_ENABLED")
+        return None
+
+    from apscheduler.schedulers.background import BackgroundScheduler
+    from apscheduler.triggers.cron import CronTrigger
+
+    expr = cron_expr or _os.environ.get("KNOWLEDGE_HEALTH_CRON", "0 * * * *")
+    trigger = CronTrigger.from_crontab(expr)
+
+    scheduler = BackgroundScheduler()
+    scheduler.add_job(
+        knowledge_health_job,
+        trigger=trigger,
+        id="knowledge_health_job",
+        name="Knowledge adaption health check",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+    if paused:
+        scheduler.start(paused=True)
+    else:
+        scheduler.start()
+    logger.info("knowledge_health_job: scheduled", cron_expr=expr)
+    return scheduler
