@@ -209,7 +209,7 @@ def test_context_regime_overrides_live_lookup(model_paths, isolate_metadata):
 def test_unexpected_exception_returns_neutral(monkeypatch):
     def boom(*a, **kw):
         raise RuntimeError("kapow")
-    monkeypatch.setattr("agents.knowledge_agent._resolve_path", boom)
+    monkeypatch.setattr("agents.knowledge_agent._safe_pickle_path", boom)
     sig = KnowledgeAdaptionAgent().run({"regime": "trending_bull"})
     assert sig.signal == "neutral"
     assert sig.confidence == 0.3
@@ -283,3 +283,119 @@ def test_cli_exits_nonzero_on_retrain(tmp_path, monkeypatch):
     )
     assert result.returncode == 1
     assert "retrain" in result.stdout
+
+
+# ── Pickle path confinement (#124) ────────────────────────────────────────────
+
+from agents.knowledge_agent import (  # noqa: E402  (after CLI tests is fine)
+    _confine_pickle_path,
+    _safe_pickle_path,
+)
+
+
+class TestConfinePicklePath:
+    def test_accepts_repo_relative_path(self):
+        # models/lgbm_alpha.pkl under the repo root
+        repo_root = Path(__file__).resolve().parent.parent
+        candidate = repo_root / "models" / "lgbm_alpha.pkl"
+        resolved = _confine_pickle_path(candidate)
+        assert resolved == candidate.resolve()
+
+    def test_accepts_tempdir_path(self, tmp_path):
+        # tmp_path lives under the system temp dir, explicitly allowed for tests
+        candidate = tmp_path / "fixture.pkl"
+        candidate.write_bytes(b"")
+        resolved = _confine_pickle_path(candidate)
+        assert resolved == candidate.resolve()
+
+    def test_rejects_etc_passwd(self):
+        with pytest.raises(ValueError, match="outside allowed roots"):
+            _confine_pickle_path("/etc/passwd")
+
+    def test_rejects_traversal_out_of_repo(self):
+        # A repo-rooted path that traverses up past the repo escapes to a
+        # parent directory that is neither repo-root nor tmpdir.
+        repo_root = Path(__file__).resolve().parent.parent
+        traversal = repo_root / ".." / ".." / ".." / "etc" / "passwd"
+        with pytest.raises(ValueError, match="outside allowed roots"):
+            _confine_pickle_path(traversal)
+
+
+class TestSafePicklePath:
+    def test_env_override_under_tempdir_is_allowed(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("LGBM_ALPHA_MODEL_PATH", str(tmp_path / "x.pkl"))
+        resolved = _safe_pickle_path("LGBM_ALPHA_MODEL_PATH", "models/lgbm_alpha.pkl")
+        assert resolved.parent == tmp_path.resolve()
+
+    def test_env_override_outside_allowed_roots_raises(self, monkeypatch):
+        monkeypatch.setenv("LGBM_ALPHA_MODEL_PATH", "/etc/passwd")
+        with pytest.raises(ValueError, match="outside allowed roots"):
+            _safe_pickle_path("LGBM_ALPHA_MODEL_PATH", "models/lgbm_alpha.pkl")
+
+    def test_default_repo_relative_is_allowed(self, monkeypatch):
+        monkeypatch.delenv("LGBM_ALPHA_MODEL_PATH", raising=False)
+        resolved = _safe_pickle_path("LGBM_ALPHA_MODEL_PATH", "models/lgbm_alpha.pkl")
+        repo_root = Path(__file__).resolve().parent.parent
+        assert resolved == (repo_root / "models" / "lgbm_alpha.pkl").resolve()
+
+
+def test_unsafe_env_path_fails_closed(monkeypatch, isolate_metadata):
+    # When LGBM_ALPHA_MODEL_PATH points outside the allowed roots, the agent
+    # must refuse to load and return a retrain verdict rather than silently
+    # loading a potentially-hostile pickle.
+    monkeypatch.setenv("LGBM_ALPHA_MODEL_PATH", "/etc/passwd")
+    monkeypatch.setenv("LGBM_REGIME_MODELS_PATH", "/etc/shadow")
+    sig = KnowledgeAdaptionAgent().run({"regime": "trending_bull"})
+    assert sig.signal == "bearish"
+    assert sig.metadata["recommendation"] == "retrain"
+    assert "untrusted path" in sig.reasoning
+
+
+# ── at_risk demotion (#124) ───────────────────────────────────────────────────
+
+def test_at_risk_demotes_fresh_to_monitor(model_paths, isolate_metadata):
+    baseline, regime = model_paths
+    _write_pickle(baseline, {"model": object()}, age_seconds=60)
+    _write_pickle(
+        regime, {"models": {"trending_bull": 1, "trending_bear": 1,
+                             "mean_reverting": 1, "high_vol": 1}}, age_seconds=60,
+    )
+    # Would normally verdict "fresh"; at_risk=True demotes to monitor.
+    sig = KnowledgeAdaptionAgent().run(
+        {"regime": "trending_bull", "at_risk": True}
+    )
+    assert sig.signal == "neutral"
+    assert sig.metadata["recommendation"] == "monitor"
+    assert sig.metadata["at_risk"] is True
+    assert "boundary" in sig.reasoning
+
+
+def test_at_risk_false_keeps_fresh(model_paths, isolate_metadata):
+    baseline, regime = model_paths
+    _write_pickle(baseline, {"model": object()}, age_seconds=60)
+    _write_pickle(
+        regime, {"models": {"trending_bull": 1, "trending_bear": 1,
+                             "mean_reverting": 1, "high_vol": 1}}, age_seconds=60,
+    )
+    sig = KnowledgeAdaptionAgent().run(
+        {"regime": "trending_bull", "at_risk": False}
+    )
+    assert sig.signal == "bullish"
+    assert sig.metadata["recommendation"] == "fresh"
+    assert sig.metadata["at_risk"] is False
+
+
+def test_at_risk_does_not_override_retrain(model_paths, isolate_metadata):
+    # With a stale baseline the verdict should stay retrain even if at_risk=True
+    baseline, regime = model_paths
+    days = 60 * 86400
+    _write_pickle(baseline, {"model": object()}, age_seconds=days)
+    _write_pickle(
+        regime, {"models": {"trending_bull": 1, "trending_bear": 1,
+                             "mean_reverting": 1, "high_vol": 1}}, age_seconds=days,
+    )
+    sig = KnowledgeAdaptionAgent().run(
+        {"regime": "trending_bull", "at_risk": True}
+    )
+    assert sig.signal == "bearish"
+    assert sig.metadata["recommendation"] == "retrain"

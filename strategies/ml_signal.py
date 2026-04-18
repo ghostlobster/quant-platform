@@ -8,6 +8,16 @@ for long/short or momentum-overlay strategies.
 Falls back to a momentum-composite score when lightgbm is not installed or
 no trained model checkpoint is present.
 
+Threat model (pickle path confinement)
+--------------------------------------
+The paths read from ``LGBM_ALPHA_MODEL_PATH`` / ``LGBM_REGIME_MODELS_PATH``
+feed ``pickle.load``, which executes arbitrary code during deserialisation.
+Environment variables are therefore treated as **operator-trusted** — they
+should only be set by the human who deploys the platform. As
+defence-in-depth every load site runs the candidate path through
+``agents.knowledge_agent._confine_pickle_path`` and refuses any path that
+escapes the repo root or system temp dir.
+
 ENV vars
 --------
     LGBM_ALPHA_MODEL_PATH       path to baseline model pickle
@@ -28,6 +38,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from agents.knowledge_agent import _confine_pickle_path
 from analysis.regime import get_live_regime
 from data.features import _FEATURE_COLS, build_feature_matrix
 from data.fetcher import fetch_ohlcv
@@ -104,7 +115,14 @@ class MLSignal:
 
     def _load_if_available(self) -> None:
         """Load a persisted baseline model checkpoint if it exists."""
-        path = Path(self._model_path)
+        try:
+            path = _confine_pickle_path(self._model_path)
+        except ValueError as exc:
+            log.error(
+                "ml_signal: refusing unsafe baseline path",
+                path=str(self._model_path), error=str(exc),
+            )
+            return
         if not path.exists():
             log.info("ml_signal: no baseline checkpoint found, will use fallback", path=str(path))
             return
@@ -132,7 +150,14 @@ class MLSignal:
 
     def _load_regime_models_if_available(self) -> None:
         """Load persisted regime-conditioned model checkpoints if they exist."""
-        path = Path(self._regime_model_path)
+        try:
+            path = _confine_pickle_path(self._regime_model_path)
+        except ValueError as exc:
+            log.error(
+                "ml_signal: refusing unsafe regime-models path",
+                path=str(self._regime_model_path), error=str(exc),
+            )
+            return
         if not path.exists():
             return
         try:

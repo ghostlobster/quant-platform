@@ -34,6 +34,30 @@ REGIME_STATES: list[str] = [
     "high_vol",
 ]
 
+# ── Regime-boundary tolerances ─────────────────────────────────────────────────
+# When SPY is near its 200d SMA *or* VIX is near the mean-reverting boundary
+# of 20, the quantitative classifier is one data point away from flipping.
+# Downstream consumers (KnowledgeAdaptionAgent) treat these zones as `at_risk`
+# so they can proactively demote model confidence.
+_SPY_SMA_TOL_PCT: float = 0.02   # ±2% of SMA200
+_VIX_TOL_PCT: float = 0.10       # ±10% of the 20-VIX boundary → [18, 22]
+_VIX_BOUNDARY: float = 20.0
+
+
+def is_regime_at_risk(spy_price: float, spy_sma200: float, vix: float) -> bool:
+    """Return ``True`` when the regime classifier is near a boundary.
+
+    Boundaries: SPY within ``±_SPY_SMA_TOL_PCT`` of its 200d SMA, OR VIX
+    within ``±_VIX_TOL_PCT`` of ``_VIX_BOUNDARY``. Near either boundary the
+    next session can flip the regime; consumers should treat the current
+    regime as provisional.
+    """
+    if spy_sma200 == 0:
+        return False
+    sma_dev = abs(spy_price - spy_sma200) / abs(spy_sma200)
+    vix_dev = abs(vix - _VIX_BOUNDARY) / _VIX_BOUNDARY
+    return sma_dev <= _SPY_SMA_TOL_PCT or vix_dev <= _VIX_TOL_PCT
+
 # ── Regime metadata ────────────────────────────────────────────────────────────
 
 REGIME_METADATA: dict[str, dict] = {
@@ -180,6 +204,7 @@ def get_live_regime() -> dict:
         "vix": vix_level,
         "description": meta["description"],
         "recommended_strategies": list(meta["recommended_strategies"]),
+        "at_risk": is_regime_at_risk(spy_price, sma200, vix_level),
     }
 
 
