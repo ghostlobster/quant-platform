@@ -153,6 +153,18 @@ def main(argv: list[str] | None = None) -> None:
         scores = model.predict(tickers, period="6mo")
         log.info("daily_ml_execute: scored", n_scores=len(scores))
 
+        # Persist scored rows before routing — covers the case where the
+        # circuit breaker (#120) or an execute_ml_signals exception skips
+        # the writer inside strategies/ml_execution.py.
+        try:
+            from analysis.live_ic import record_predictions
+
+            record_predictions(scores, model_name="lgbm_alpha", horizon_d=5)
+        except Exception as exc:
+            log.warning(
+                "daily_ml_execute: record_predictions failed", error=str(exc),
+            )
+
         actions = execute_ml_signals(
             scores,
             threshold=threshold,

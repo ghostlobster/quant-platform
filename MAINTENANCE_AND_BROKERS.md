@@ -464,6 +464,53 @@ with `KNOWLEDGE_HEALTH_CRON`, disable with `KNOWLEDGE_HEALTH_ENABLED=0`).
 Ensures stale models are flagged even on quiet days when no trade flow
 would otherwise invoke the agent.
 
+### 11.4 Live-IC pipeline (#115)
+
+Without real-time IC feedback the agent's IC-degradation branch never
+fires: mtime-based staleness and regime coverage are the only active
+gates. The live-IC pipeline closes that loop.
+
+**Writer.** `strategies/ml_execution.py::execute_ml_signals` and
+`cron/daily_ml_execute.py` both call
+`analysis.live_ic.record_predictions(scores, "lgbm_alpha", horizon_d=5)`
+**before** filtering by threshold — recording only traded names would
+bias the IC toward high-conviction positions. Both writers are wrapped
+in `try / except` so a DB outage can never break trading.
+
+**Storage.** New table `live_predictions (ts, ticker, model_name, score,
+horizon_d, realized)` in `quant.db`, with an index on
+`(model_name, ts DESC)` so rolling-IC reads stay O(window). Idempotent
+`INSERT OR REPLACE`; the PK dedups re-runs at the same epoch.
+
+**Backfill.** `analysis.live_ic.backfill_realized(model_name="lgbm_alpha")`
+is registered in `scheduler/alerts.py` as `live_ic_backfill_job`, running
+at 04:30 UTC daily by default (override with `LIVE_IC_BACKFILL_CRON`).
+One `fetch_ohlcv(ticker, period="3mo")` per distinct ticker in the
+candidate set — the fetcher's cache dedups across runs. Bounded by
+`max_rows=1000` so a catch-up after downtime can't exhaust memory.
+
+**Estimator.** `analysis.live_ic.rolling_live_ic("lgbm_alpha")` returns
+Spearman rank-IC over the last 60 realized rows (warm-up floor 30).
+5-minute TTL cache, invalidated on `backfill_realized`. The value is
+threaded into `KnowledgeAdaptionAgent().run({"regime": ..., "live_ic":
+...})` via `_knowledge_gate` in `strategies/ml_execution.py`.
+
+**Operator controls.**
+- `KNOWLEDGE_RECORD_PREDICTIONS=0` disables the writer (defaults on).
+- `LIVE_IC_BACKFILL_CRON` changes the backfill cadence.
+- `KNOWLEDGE_HEALTH_ENABLED=0` disables the APScheduler loop entirely
+  (kills both the health-check job and the backfill job).
+
+**Runtime risks and mitigations.**
+
+| Risk | Mitigation |
+|---|---|
+| yfinance rate limits on backfill | `fetch_ohlcv` caches via `data/price_cache`; backfill groups by ticker so each symbol is fetched at most once per run. |
+| `live_predictions` grows unbounded | Out of scope for #115 — open a retention ticket if it becomes a pain point. Rolling-IC reads use `ORDER BY ts DESC LIMIT window` so query time stays constant regardless of table size. |
+| Realized return spans a missing trading day | `_realized_return` uses `searchsorted` with `side="left"` so weekends/holidays pull the next available close. Returns `None` when either anchor is past the fetched window. |
+| Cache returns stale IC after backfill | `backfill_realized` calls `_invalidate_ic_cache(model_name)` before returning. |
+| Writer import failure during cold-start | Both call sites wrap the import in `try/except`; trading proceeds without recording, and the next invocation retries. |
+
 ### 11.3 Opt-in auto-retrain trigger (#119)
 
 **Default: off.** Set `KNOWLEDGE_AUTO_RETRAIN=1` in the environment of

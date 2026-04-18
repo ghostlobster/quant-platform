@@ -584,9 +584,57 @@ def start_knowledge_health_scheduler(
         max_instances=1,
         coalesce=True,
     )
+
+    backfill_expr = _os.environ.get("LIVE_IC_BACKFILL_CRON", "30 4 * * *")
+    scheduler.add_job(
+        live_ic_backfill_job,
+        trigger=CronTrigger.from_crontab(backfill_expr),
+        id="live_ic_backfill_job",
+        name="Live IC backfill",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+
     if paused:
         scheduler.start(paused=True)
     else:
         scheduler.start()
-    logger.info("knowledge_health_job: scheduled", cron_expr=expr)
+    logger.info(
+        "knowledge_health_job: scheduled",
+        cron_expr=expr, backfill_cron_expr=backfill_expr,
+    )
     return scheduler
+
+
+def live_ic_backfill_job() -> dict:
+    """Back-fill realized returns for expired ``live_predictions`` rows and
+    refresh the rolling IC feed for ``lgbm_alpha``.
+
+    Intended for APScheduler (daily cadence); mirrors the structured-log
+    pattern used by ``knowledge_health_job``. Returns a dict with the
+    number of rows updated and the post-backfill IC value, which is
+    useful for the ``/run-cron`` slash command and tests.
+    """
+    try:
+        from analysis.live_ic import backfill_realized, rolling_live_ic
+    except Exception as exc:
+        logger.warning("live_ic_backfill_job: import failed", error=str(exc))
+        return {"rows_updated": 0, "live_ic": None, "error": str(exc)}
+
+    try:
+        updated = backfill_realized(model_name="lgbm_alpha")
+    except Exception as exc:
+        logger.warning("live_ic_backfill_job: backfill failed", error=str(exc))
+        updated = 0
+
+    try:
+        ic = rolling_live_ic("lgbm_alpha")
+    except Exception as exc:
+        logger.warning("live_ic_backfill_job: rolling_ic failed", error=str(exc))
+        ic = None
+
+    logger.info(
+        "live_ic_backfill_job: complete", rows_updated=updated, live_ic=ic,
+    )
+    return {"rows_updated": updated, "live_ic": ic}

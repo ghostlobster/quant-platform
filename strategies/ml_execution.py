@@ -68,8 +68,20 @@ def _knowledge_gate(regime: str) -> tuple[float, str, bool]:
         log.debug("ml_execution: knowledge agent import failed", error=str(exc))
         return 1.0, "fresh", False
 
+    # Pull the rolling live IC so the agent's IC-degradation branch can fire
+    # when alpha has collapsed even though the pickle is still fresh (#115).
+    live_ic: float | None = None
     try:
-        sig = KnowledgeAdaptionAgent().run({"regime": regime})
+        from analysis.live_ic import rolling_live_ic
+
+        live_ic = rolling_live_ic("lgbm_alpha")
+    except Exception as exc:
+        log.debug("ml_execution: rolling_live_ic failed", error=str(exc))
+
+    try:
+        sig = KnowledgeAdaptionAgent().run(
+            {"regime": regime, "live_ic": live_ic},
+        )
     except Exception as exc:
         log.debug("ml_execution: knowledge agent run failed", error=str(exc))
         return 1.0, "fresh", False
@@ -141,6 +153,17 @@ def execute_ml_signals(
     """
     if not scores:
         return []
+
+    # Persist scored rows to live_predictions before any filtering so the
+    # rolling IC estimator sees the unconditioned distribution — recording
+    # only traded tickers would bias the IC toward high-conviction names.
+    # Wrapped in try/except so live-IC plumbing never breaks the trading path.
+    try:
+        from analysis.live_ic import record_predictions
+
+        record_predictions(scores, model_name="lgbm_alpha", horizon_d=5)
+    except Exception as exc:
+        log.warning("ml_execution: record_predictions failed", error=str(exc))
 
     broker = broker or get_broker()
     actions: list[str] = []

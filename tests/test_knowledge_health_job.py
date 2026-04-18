@@ -109,12 +109,15 @@ def test_scheduler_registers_hourly_job(monkeypatch):
     scheduler = alerts.start_knowledge_health_scheduler(paused=True)
     try:
         assert scheduler is not None
-        jobs = scheduler.get_jobs()
-        assert len(jobs) == 1
-        job = jobs[0]
-        assert job.id == "knowledge_health_job"
-        # Default cron is top-of-hour; confirm the trigger reflects that
-        assert "hour='*'" in str(job.trigger) or "minute='0'" in str(job.trigger)
+        jobs = {job.id: job for job in scheduler.get_jobs()}
+        # Expected jobs: health check (#116) + live IC backfill (#115).
+        assert set(jobs) == {"knowledge_health_job", "live_ic_backfill_job"}
+        health_job = jobs["knowledge_health_job"]
+        # Default cron is top-of-hour; confirm the trigger reflects that.
+        assert (
+            "hour='*'" in str(health_job.trigger)
+            or "minute='0'" in str(health_job.trigger)
+        )
     finally:
         scheduler.shutdown(wait=False)
 
@@ -127,9 +130,9 @@ def test_scheduler_honours_cron_expr(monkeypatch):
     )
     try:
         assert scheduler is not None
-        jobs = scheduler.get_jobs()
-        assert len(jobs) == 1
-        assert "*/15" in str(jobs[0].trigger)
+        jobs = {job.id: job for job in scheduler.get_jobs()}
+        assert "knowledge_health_job" in jobs
+        assert "*/15" in str(jobs["knowledge_health_job"].trigger)
     finally:
         scheduler.shutdown(wait=False)
 
@@ -141,6 +144,23 @@ def test_scheduler_reads_cron_from_env(monkeypatch):
     scheduler = alerts.start_knowledge_health_scheduler(paused=True)
     try:
         assert scheduler is not None
-        assert "*/2" in str(scheduler.get_jobs()[0].trigger)
+        jobs = {job.id: job for job in scheduler.get_jobs()}
+        assert "*/2" in str(jobs["knowledge_health_job"].trigger)
+    finally:
+        scheduler.shutdown(wait=False)
+
+
+def test_scheduler_registers_backfill_job(monkeypatch):
+    """New #115 job: daily live_ic backfill registered on the same scheduler."""
+    import scheduler.alerts as alerts
+
+    monkeypatch.setenv("LIVE_IC_BACKFILL_CRON", "17 3 * * *")
+    scheduler = alerts.start_knowledge_health_scheduler(paused=True)
+    try:
+        assert scheduler is not None
+        jobs = {job.id: job for job in scheduler.get_jobs()}
+        assert "live_ic_backfill_job" in jobs
+        assert "hour='3'" in str(jobs["live_ic_backfill_job"].trigger)
+        assert "minute='17'" in str(jobs["live_ic_backfill_job"].trigger)
     finally:
         scheduler.shutdown(wait=False)
