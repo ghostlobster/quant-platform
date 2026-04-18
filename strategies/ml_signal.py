@@ -337,13 +337,27 @@ class MLSignal:
             pickle.dump({"model": model, "is_classifier": is_classifier}, f)
         log.info("ml_signal: baseline checkpoint saved", path=self._model_path)
 
-        # Write metadata to quant.db
+        # Write metadata + feature-distribution fingerprint to quant.db
+        # under a single shared `trained_at` so #118 drift reads and #122
+        # IC-delta reads always line up.
+        trained_at = time.time()
         self._write_metadata(
             n_tickers=len(tickers),
             period=period,
             train_ic=train_ic,
             test_ic=test_ic,
+            trained_at=trained_at,
         )
+        try:
+            from analysis.drift import summarize_features
+
+            feature_frame = train_df[feature_cols]
+            stats = summarize_features(feature_frame, feature_cols)
+            self._write_feature_stats(stats, trained_at=trained_at)
+        except Exception as exc:
+            log.warning(
+                "ml_signal: could not persist feature stats", error=str(exc),
+            )
 
         return {
             "train_ic": train_ic,
@@ -602,6 +616,7 @@ class MLSignal:
         period: str,
         train_ic: float,
         test_ic: float,
+        trained_at: float | None = None,
     ) -> None:
         """Persist training metadata to quant.db model_metadata table.
 
@@ -609,7 +624,11 @@ class MLSignal:
         ``this_test_ic - previous_test_ic`` for the same ``model_name`` so
         downstream consumers (``analysis/retrain_roi.py``,
         ``KnowledgeAdaptionAgent``) can detect IC plateaus.
+
+        ``trained_at`` may be supplied so this row shares a timestamp
+        with a subsequent ``_write_feature_stats`` call (#118).
         """
+        ts = time.time() if trained_at is None else float(trained_at)
         try:
             from data.db import get_connection
             conn = get_connection()
@@ -633,13 +652,56 @@ class MLSignal:
                     VALUES (?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
-                        "lgbm_alpha", time.time(), train_ic, test_ic,
+                        "lgbm_alpha", ts, train_ic, test_ic,
                         n_tickers, period, delta,
                     ),
                 )
             conn.close()
         except Exception as exc:
             log.warning("ml_signal: could not write metadata", error=str(exc))
+
+    def _write_feature_stats(
+        self,
+        stats: dict[str, dict[str, float]],
+        trained_at: float,
+        model_name: str = "lgbm_alpha",
+    ) -> None:
+        """Persist per-feature training fingerprint to ``model_feature_stats``.
+
+        One row per (model_name, trained_at, feature_name). INSERT OR
+        REPLACE so re-runs at the same timestamp are idempotent. Wrapped
+        in ``with conn:`` for atomicity. Silently swallows DB errors —
+        the drift detector is optional and must never break training.
+        """
+        if not stats:
+            return
+        try:
+            from data.db import get_connection
+
+            conn = get_connection()
+            with conn:
+                conn.executemany(
+                    """
+                    INSERT OR REPLACE INTO model_feature_stats
+                        (model_name, trained_at, feature_name,
+                         mean, std, q10, q50, q90, n_samples)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    [
+                        (
+                            model_name, float(trained_at), str(name),
+                            float(row["mean"]), float(row["std"]),
+                            float(row["q10"]), float(row["q50"]),
+                            float(row["q90"]), int(row["n_samples"]),
+                        )
+                        for name, row in stats.items()
+                    ],
+                )
+            conn.close()
+        except Exception as exc:
+            log.warning(
+                "ml_signal: could not write feature stats", error=str(exc),
+            )
 
     # ── Model selection ───────────────────────────────────────────────────────
 
