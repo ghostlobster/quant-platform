@@ -511,6 +511,29 @@ threaded into `KnowledgeAdaptionAgent().run({"regime": ..., "live_ic":
 | Cache returns stale IC after backfill | `backfill_realized` calls `_invalidate_ic_cache(model_name)` before returning. |
 | Writer import failure during cold-start | Both call sites wrap the import in `try/except`; trading proceeds without recording, and the next invocation retries. |
 
+### 11.5 Model Health dashboard (#121)
+
+Read-only Streamlit tab — `streamlit run app.py` → **🩺 Model Health**
+— that surfaces the state `KnowledgeAdaptionAgent` reports before every
+trade. Reads `model_metadata`, `live_predictions` (via
+`analysis.live_ic.rolling_live_ic`), and the LightGBM regime-models
+pickle. No writes, no broker calls.
+
+Four panels:
+1. **Inventory** — latest `model_metadata` row per model plus the
+   agent's current verdict and Kelly multiplier.
+2. **Live vs trained IC** — Plotly line per model; falls back to a
+   warm-up notice when `live_predictions` has fewer than 30 realized
+   rows.
+3. **Regime coverage** — matrix of `REGIME_STATES × model`. ✅ covered,
+   ❌ missing, ℹ︎ baseline (pooled).
+4. **Retrain history** — last 10 `model_metadata` rows per model with
+   `test_ic` and optional `test_ic_delta` (#122) sparklines.
+
+Cached reads (`@st.cache_data`): 60 s for the SQL helpers, 300 s for
+the `KnowledgeAdaptionAgent().run({})` call (matches the agent's own
+pickle-read TTL).
+
 ### 11.3 Opt-in auto-retrain trigger (#119)
 
 **Default: off.** Set `KNOWLEDGE_AUTO_RETRAIN=1` in the environment of

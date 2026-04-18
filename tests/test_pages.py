@@ -876,3 +876,125 @@ class TestPagesMlSignals:
         _ST.button.side_effect = None
         _ST.button.return_value = False
         _ST.checkbox.return_value = True
+
+
+# ── pages/model_health.py ─────────────────────────────────────────────────────
+
+import pages.model_health as pg_model_health  # noqa: E402
+
+
+class TestPagesModelHealth:
+    """Smoke tests for the #121 Model Health tab.
+
+    Follows the one-file-per-module rule by folding into test_pages.py
+    alongside the other page smokes (sibling-page convention — see
+    docs/reviews/2026-04-18-issue-121-model-health-page.md).
+    """
+
+    def _clear_cache(self):
+        # Streamlit's @st.cache_data is mocked as a passthrough in this
+        # module, but the module-level caches we introduced are not — clear
+        # the cached callables by poking their __wrapped__ or re-importing.
+        # Since the mock makes them plain functions, nothing to clear.
+        pass
+
+    def test_render_empty_db_does_not_crash(self):
+        _reset_session()
+        empty = pd.DataFrame(
+            columns=["model_name", "trained_at", "test_ic",
+                     "test_ic_delta", "n_tickers", "period"],
+        )
+        with (
+            patch("pages.model_health._latest_metadata", return_value=empty),
+            patch("pages.model_health._regime_coverage_map",
+                  return_value={"lgbm_regime": []}),
+            patch("pages.model_health._knowledge_verdict", return_value={}),
+            patch("pages.model_health._rolling_live_ic", return_value=None),
+        ):
+            pg_model_health.render()
+        # Four info banners expected (one per panel's empty-state branch)
+        assert _ST.info.called
+
+    def test_render_with_synthetic_metadata_displays_dataframe(self):
+        _reset_session()
+        inventory = pd.DataFrame(
+            {
+                "model_name":    ["lgbm_alpha", "lgbm_regime"],
+                "trained_at":    [1_700_000_000.0, 1_700_100_000.0],
+                "test_ic":       [0.03, 0.04],
+                "test_ic_delta": [None, 0.01],
+                "n_tickers":     [5, 5],
+                "period":        ["2y", "2y"],
+            }
+        )
+        history = pd.DataFrame(
+            {
+                "trained_at":    [1_690_000_000.0, 1_700_000_000.0],
+                "test_ic":       [0.02, 0.03],
+                "test_ic_delta": [None, 0.01],
+                "n_tickers":     [5, 5],
+                "period":        ["2y", "2y"],
+            }
+        )
+        _ST.dataframe.reset_mock()
+        with (
+            patch("pages.model_health._latest_metadata", return_value=inventory),
+            patch("pages.model_health._retrain_history", return_value=history),
+            patch(
+                "pages.model_health._regime_coverage_map",
+                return_value={"lgbm_regime": ["trending_bull", "trending_bear"]},
+            ),
+            patch(
+                "pages.model_health._knowledge_verdict",
+                return_value={"recommendation": "monitor"},
+            ),
+            patch("pages.model_health._rolling_live_ic", return_value=0.015),
+        ):
+            pg_model_health.render()
+
+        # At least one st.dataframe call carrying our model names.
+        assert _ST.dataframe.called
+        frames_passed = [
+            call.args[0] for call in _ST.dataframe.call_args_list
+            if call.args and hasattr(call.args[0], "columns")
+        ]
+        names_seen: set[str] = set()
+        for fr in frames_passed:
+            if "model_name" in getattr(fr, "columns", []):
+                names_seen.update(fr["model_name"].tolist())
+        assert "lgbm_alpha" in names_seen
+        assert "lgbm_regime" in names_seen
+
+    def test_render_falls_back_when_live_ic_unavailable(self):
+        _reset_session()
+        inventory = pd.DataFrame(
+            {
+                "model_name":    ["lgbm_alpha"],
+                "trained_at":    [1_700_000_000.0],
+                "test_ic":       [0.03],
+                "test_ic_delta": [None],
+                "n_tickers":     [5],
+                "period":        ["2y"],
+            }
+        )
+        _ST.info.reset_mock()
+        with (
+            patch("pages.model_health._latest_metadata", return_value=inventory),
+            patch(
+                "pages.model_health._retrain_history",
+                return_value=pd.DataFrame(columns=list(inventory.columns)),
+            ),
+            patch("pages.model_health._regime_coverage_map",
+                  return_value={"lgbm_regime": []}),
+            patch("pages.model_health._knowledge_verdict",
+                  return_value={"recommendation": "fresh"}),
+            patch("pages.model_health._rolling_live_ic", return_value=None),
+        ):
+            pg_model_health.render()
+
+        # Panel 2 must emit the warm-up banner when live IC is None.
+        info_messages = [
+            call.args[0] for call in _ST.info.call_args_list
+            if call.args and isinstance(call.args[0], str)
+        ]
+        assert any("warming up" in msg for msg in info_messages)
