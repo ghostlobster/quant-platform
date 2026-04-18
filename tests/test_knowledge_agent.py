@@ -448,3 +448,182 @@ def test_plateau_does_not_override_retrain(model_paths, isolate_metadata):
         {"regime": "trending_bull", "plateau_detected": True}
     )
     assert sig.metadata["recommendation"] == "retrain"
+
+
+# ── Opt-in auto-retrain (#119) ────────────────────────────────────────────────
+
+def _make_agent_with_fake_stamp(popen):
+    """Return (agent, stamp_dict) wired to an in-memory stamp store."""
+    stamp: dict[str, float] = {}
+
+    def _reader(name: str) -> float:
+        return stamp.get(name, 0.0)
+
+    def _writer(name: str, now: float) -> None:
+        stamp[name] = now
+
+    agent = KnowledgeAdaptionAgent()
+    agent._popen = staticmethod(popen)  # type: ignore[method-assign]
+    agent._retrain_reader = staticmethod(_reader)  # type: ignore[method-assign]
+    agent._retrain_writer = staticmethod(_writer)  # type: ignore[method-assign]
+    return agent, stamp
+
+
+def test_auto_retrain_disabled_by_default(model_paths, isolate_metadata, monkeypatch):
+    monkeypatch.delenv("KNOWLEDGE_AUTO_RETRAIN", raising=False)
+    popen = MagicMock()
+    agent, _ = _make_agent_with_fake_stamp(popen)
+    # Missing pickles → retrain verdict.
+    sig = agent.run({"regime": "trending_bull"})
+    assert sig.metadata["recommendation"] == "retrain"
+    popen.assert_not_called()
+    assert "auto_retrain" not in sig.metadata
+
+
+def test_auto_retrain_fires_once_within_cooldown(
+    model_paths, isolate_metadata, monkeypatch,
+):
+    monkeypatch.setenv("KNOWLEDGE_AUTO_RETRAIN", "1")
+    popen = MagicMock()
+    popen.return_value = MagicMock(pid=12345, wait=MagicMock(return_value=0))
+    agent, stamp = _make_agent_with_fake_stamp(popen)
+
+    clock = [1_000_000.0]
+    agent._clock = staticmethod(lambda: clock[0])  # type: ignore[method-assign]
+
+    sig1 = agent.run({"regime": "trending_bull"})
+    assert sig1.metadata["auto_retrain"]["auto_retrain"] == "launched"
+    assert sig1.metadata["auto_retrain"]["pid"] == 12345
+
+    # Second call within cooldown: popen must not fire again.
+    clock[0] += 60.0
+    sig2 = agent.run({"regime": "trending_bull"})
+    assert popen.call_count == 1
+    assert sig2.metadata["auto_retrain"]["auto_retrain"] == "throttled"
+    assert sig2.metadata["auto_retrain"]["seconds_until_next"] > 0
+
+
+def test_auto_retrain_refires_after_cooldown(
+    model_paths, isolate_metadata, monkeypatch,
+):
+    monkeypatch.setenv("KNOWLEDGE_AUTO_RETRAIN", "1")
+    monkeypatch.setenv("KNOWLEDGE_RETRAIN_COOLDOWN", "3600")
+    popen = MagicMock()
+    popen.return_value = MagicMock(pid=42, wait=MagicMock(return_value=0))
+    agent, _ = _make_agent_with_fake_stamp(popen)
+
+    clock = [1_000_000.0]
+    agent._clock = staticmethod(lambda: clock[0])  # type: ignore[method-assign]
+
+    agent.run({"regime": "trending_bull"})
+    clock[0] += 7200.0  # 2h, past the 1h cooldown
+    agent.run({"regime": "trending_bull"})
+    assert popen.call_count == 2
+
+
+def test_auto_retrain_not_fired_on_fresh_or_monitor(
+    model_paths, isolate_metadata, monkeypatch,
+):
+    monkeypatch.setenv("KNOWLEDGE_AUTO_RETRAIN", "1")
+    popen = MagicMock()
+    agent, _ = _make_agent_with_fake_stamp(popen)
+
+    # Fresh pickles → fresh verdict, no subprocess.
+    baseline, regime = model_paths
+    _write_pickle(baseline, {"model": object()}, age_seconds=60)
+    _write_pickle(
+        regime, {"models": {"trending_bull": 1, "trending_bear": 1,
+                             "mean_reverting": 1, "high_vol": 1}}, age_seconds=60,
+    )
+    sig = agent.run({"regime": "trending_bull"})
+    assert sig.metadata["recommendation"] == "fresh"
+    popen.assert_not_called()
+
+
+def test_auto_retrain_subprocess_error_does_not_crash_agent(
+    model_paths, isolate_metadata, monkeypatch,
+):
+    monkeypatch.setenv("KNOWLEDGE_AUTO_RETRAIN", "1")
+    popen = MagicMock(side_effect=OSError("fork failed"))
+    agent, stamp = _make_agent_with_fake_stamp(popen)
+
+    sig = agent.run({"regime": "trending_bull"})
+    # Agent still returns a valid AgentSignal.
+    assert sig.metadata["recommendation"] == "retrain"
+    assert sig.metadata["auto_retrain"]["auto_retrain"] == "failed"
+    assert "fork failed" in sig.metadata["auto_retrain"]["error"]
+    # Stamp must not be written on failure — otherwise retries are throttled.
+    assert stamp == {}
+
+
+def test_auto_retrain_launch_alert_subject_differs(
+    model_paths, isolate_metadata, monkeypatch,
+):
+    monkeypatch.setenv("KNOWLEDGE_AUTO_RETRAIN", "1")
+    popen = MagicMock()
+    popen.return_value = MagicMock(pid=99, wait=MagicMock(return_value=0))
+    channel = MagicMock()
+    channel.send = MagicMock(return_value=True)
+    monkeypatch.setattr(
+        "providers.alert.get_alert_channel", lambda *a, **kw: channel,
+    )
+
+    agent, _ = _make_agent_with_fake_stamp(popen)
+    agent.run({"regime": "trending_bull"})
+
+    # Two alerts fire: the stale-model alert + the auto-retrain launch alert.
+    # They must use different subjects so operators can distinguish them.
+    subjects = [call.args[0] for call in channel.send.call_args_list]
+    assert any("retrain recommended" in s for s in subjects)
+    assert any("auto-retrain launched" in s for s in subjects)
+
+
+def _isolate_stamp_db(monkeypatch, tmp_path):
+    """Point data.db at a fresh SQLite file in tmp_path and re-init schema."""
+    db_file = tmp_path / "quant-stamp-test.db"
+    import data.db as _db_mod
+    monkeypatch.setattr(_db_mod, "_DB_PATH", db_file)
+    _db_mod.init_db()
+
+
+def test_auto_retrain_stamp_persists_across_instances(
+    model_paths, isolate_metadata, monkeypatch, tmp_path,
+):
+    # Use a real SQLite DB so the stamp survives across
+    # KnowledgeAdaptionAgent() instantiations — exactly the case the
+    # SQLite-backed dedup stamp is designed to cover.
+    _isolate_stamp_db(monkeypatch, tmp_path)
+
+    monkeypatch.setenv("KNOWLEDGE_AUTO_RETRAIN", "1")
+    popen = MagicMock()
+    popen.return_value = MagicMock(pid=7, wait=MagicMock(return_value=0))
+
+    clock = [2_000_000.0]
+
+    agent1 = KnowledgeAdaptionAgent()
+    agent1._popen = staticmethod(popen)  # type: ignore[method-assign]
+    agent1._clock = staticmethod(lambda: clock[0])  # type: ignore[method-assign]
+    agent1.run({"regime": "trending_bull"})
+    assert popen.call_count == 1
+
+    agent2 = KnowledgeAdaptionAgent()
+    agent2._popen = staticmethod(popen)  # type: ignore[method-assign]
+    agent2._clock = staticmethod(lambda: clock[0] + 60.0)  # inside cooldown
+    sig = agent2.run({"regime": "trending_bull"})
+
+    # Second agent must see the stamp from the first and NOT fire popen again.
+    assert popen.call_count == 1
+    assert sig.metadata["auto_retrain"]["auto_retrain"] == "throttled"
+
+
+def test_stamp_read_write_roundtrip(tmp_path, monkeypatch):
+    # Bypass the agent — exercise _read_stamp / _write_stamp directly.
+    _isolate_stamp_db(monkeypatch, tmp_path)
+    from agents.knowledge_agent import _read_stamp, _write_stamp
+
+    assert _read_stamp("nonexistent") == 0.0
+    _write_stamp("retrain_fired_at", 1_234_567.89)
+    assert _read_stamp("retrain_fired_at") == 1_234_567.89
+    # Upsert semantics: second write overwrites.
+    _write_stamp("retrain_fired_at", 9_999_999.0)
+    assert _read_stamp("retrain_fired_at") == 9_999_999.0
