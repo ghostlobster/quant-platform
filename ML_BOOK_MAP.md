@@ -110,7 +110,7 @@ graph LR
 |----------------------------------------------|--------------------------------|:------:|-----------------------------------------------------------------|
 | 1 — ML for Trading                           | idea → execution               |   ✅   | architecture per `PLAN.md`                                      |
 | 2 — Market & Fundamental Data                | OHLCV, adjusted prices         |   ✅   | `data/fetcher.py`, `adapters/market_data/`                      |
-| 3 — Alternative Data                         | sentiment, macro               |   🟡   | `adapters/sentiment/` (Vader, StockTwits); no macro yet         |
+| 3 — Alternative Data                         | sentiment, macro               |   ✅   | `adapters/sentiment/` (Vader, StockTwits) + `adapters/macro/` (FRED, mock), `data/macro.py` cache |
 | 4 — Financial Feature Engineering            | factors, momentum, value       |   ✅   | `data/features.py`, `strategies/indicators.py`                  |
 | 5 — Portfolio Optimization & Performance     | Markowitz, efficient frontier  |   ✅   | `risk/markowitz.py`                                             |
 | 6 — The Machine Learning Process             | CV, HPO, pipelines             |   ✅   | `backtester/walk_forward.py`, `strategies/ml_tuning.py`         |

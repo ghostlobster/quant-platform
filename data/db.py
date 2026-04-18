@@ -133,6 +133,17 @@ def init_db() -> None:
             )
         """)
 
+        # ----- Macro / alternative-data series cache (Jansen Ch 3) -----
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS macro_cache (
+                series_id   TEXT    NOT NULL,
+                obs_date    TEXT    NOT NULL,    -- ISO date 'YYYY-MM-DD'
+                value       REAL,
+                fetched_at  REAL    NOT NULL,    -- Unix timestamp
+                PRIMARY KEY (series_id, obs_date)
+            )
+        """)
+
         # Seed paper_account if absent
         import os
         starting_cash = float(os.getenv("PAPER_STARTING_CASH", "100000"))
