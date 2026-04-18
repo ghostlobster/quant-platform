@@ -124,7 +124,7 @@ graph LR
 | 14 — Text Data / Sentiment Analysis          | Vader, VADER                   |   ✅   | `adapters/sentiment/vader_adapter.py`                           |
 | 15 — Topic Modeling                          | LDA on news                    |   ✅   | `analysis/topic_modeling.py` (fit_lda + infer_topics + top_terms_per_topic + ticker_topic_distribution) |
 | 16 — Word Embeddings                         | word2vec on filings            |   ✅   | `analysis/word_embeddings.py` (train_embeddings + document_embedding + nearest_terms via gensim) |
-| 17 — Deep Learning for Trading               | Keras / PyTorch intro          |   🟡   | `strategies/dl_signal.py` LSTM alpha (torch-gated); full DL workflow partial |
+| 17 — Deep Learning for Trading               | Keras / PyTorch intro          |   ✅   | `strategies/mlp_signal.py` (sklearn MLPRegressor, FFN intro) + `strategies/dl_signal.py` LSTM (torch) |
 | 18 — CNNs                                    | image / chart patterns         |   ✅   | `analysis/chart_images.py` (GAF + OHLC raster) + `strategies/cnn_signal.py` (Conv2d alpha) |
 | 19 — RNNs / LSTM                             | sequence models                |   ✅   | `strategies/dl_signal.py` (_LSTMRegressor + windowed training)  |
 | 20 — Autoencoders                            | conditional risk factors       |   ✅   | `analysis/risk_autoencoder.py` (train_autoencoder + latent_factors + reconstruction_error) |
