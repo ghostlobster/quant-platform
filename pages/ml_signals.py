@@ -322,6 +322,7 @@ def render() -> None:
                 st.session_state["bayes_sigma"] = bayes_sigma
 
                 blend_sources: list[dict] = [lgbm_scores, ridge_scores, bayes_scores]
+                blend_model_names: list[str] = ["lgbm_alpha", "linear_ridge", "bayesian"]
 
                 if enable_sentiment:
                     from strategies.sentiment_signal import sentiment_alpha_scores
@@ -330,8 +331,11 @@ def render() -> None:
                     st.session_state["sentiment_scores"] = sentiment_scores
                     if sentiment_scores:
                         blend_sources.append(sentiment_scores)
+                        blend_model_names.append("sentiment")
 
-                ensemble_scores = blend_signals(*blend_sources)
+                ensemble_scores = blend_signals(
+                    *blend_sources, model_names=blend_model_names,
+                )
                 st.session_state["ensemble_scores"] = ensemble_scores
             except Exception as exc:
                 st.error(f"Scoring failed: {exc}")
@@ -463,6 +467,9 @@ def render() -> None:
                     source_keys = [
                         "ml_scores", "ridge_scores", "bayes_scores", "dl_scores",
                     ]
+                    source_model_names = [
+                        "lgbm_alpha", "linear_ridge", "bayesian", "dl_lstm",
+                    ]
                     if enable_sentiment:
                         from strategies.sentiment_signal import (
                             sentiment_alpha_scores,
@@ -471,15 +478,23 @@ def render() -> None:
                             sentiment_alpha_scores(selected_tickers)
                         )
                         source_keys.append("sentiment_scores")
-                    sources = [st.session_state.get(k, {}) for k in source_keys]
-                    non_empty = [s for s in sources if s]
+                        source_model_names.append("sentiment")
+                    pairs = [
+                        (st.session_state.get(k, {}), name)
+                        for k, name in zip(source_keys, source_model_names)
+                    ]
+                    non_empty = [(s, name) for s, name in pairs if s]
                     if not non_empty:
                         st.warning(
                             "Compute at least one of LGBM / Ridge / Bayesian / DL "
                             "scores first."
                         )
                     else:
-                        st.session_state["ensemble_scores"] = blend_signals(*non_empty)
+                        non_empty_sources = [s for s, _ in non_empty]
+                        non_empty_names = [name for _, name in non_empty]
+                        st.session_state["ensemble_scores"] = blend_signals(
+                            *non_empty_sources, model_names=non_empty_names,
+                        )
                 except Exception as exc:
                     st.error(f"Ensemble blending failed: {exc}")
         if "ensemble_scores" in st.session_state:
