@@ -118,7 +118,7 @@ graph LR
 | 8 — The ML4T Workflow                        | backtest loop                  |   ✅   | `backtester/engine.py:run_signal_backtest`                      |
 | 9 — Time-Series Models                       | GARCH, cointegration           |   ✅   | `analysis/garch.py` (fit_garch) + `analysis/cointegration.py` (engle_granger, screen_cointegrated_pairs) |
 | 10 — Bayesian ML                             | Bayesian linear regression     |   ✅   | `strategies/bayesian_signal.py` (BayesianRidge + predict_with_uncertainty) |
-| 11 — Random Forests                          | long-short strategies          |   🟡   | used internally by `meta_label.py`; no dedicated strategy       |
+| 11 — Random Forests                          | long-short strategies          |   ✅   | `strategies/rf_long_short.py` (RFLongShortSignal + long_short_portfolio) |
 | 12 — Boosting                                | LightGBM / XGBoost             |   ✅   | `strategies/ml_signal.py`                                       |
 | 13 — Unsupervised Learning                   | PCA, k-means, risk factors     |   ✅   | `analysis/unsupervised.py` (PCA loadings + scree; k-means on corr-distance) |
 | 14 — Text Data / Sentiment Analysis          | Vader, VADER                   |   ✅   | `adapters/sentiment/vader_adapter.py`                           |
