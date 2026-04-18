@@ -123,7 +123,7 @@ graph LR
 | 13 — Unsupervised Learning                   | PCA, k-means, risk factors     |   ✅   | `analysis/unsupervised.py` (PCA loadings + scree; k-means on corr-distance) |
 | 14 — Text Data / Sentiment Analysis          | Vader, VADER                   |   ✅   | `adapters/sentiment/vader_adapter.py`                           |
 | 15 — Topic Modeling                          | LDA on news                    |   ✅   | `analysis/topic_modeling.py` (fit_lda + infer_topics + top_terms_per_topic + ticker_topic_distribution) |
-| 16 — Word Embeddings                         | word2vec on filings            |   ⏳   | _planned_ — see issue "Word embeddings on filings"              |
+| 16 — Word Embeddings                         | word2vec on filings            |   ✅   | `analysis/word_embeddings.py` (train_embeddings + document_embedding + nearest_terms via gensim) |
 | 17 — Deep Learning for Trading               | Keras / PyTorch intro          |   🟡   | `strategies/dl_signal.py` LSTM alpha (torch-gated); full DL workflow partial |
 | 18 — CNNs                                    | image / chart patterns         |   ⏳   | _planned_ — CNN chart patterns not yet implemented              |
 | 19 — RNNs / LSTM                             | sequence models                |   ✅   | `strategies/dl_signal.py` (_LSTMRegressor + windowed training)  |
