@@ -1,6 +1,6 @@
 ---
-description: Manually run a cron job (cron.daily_ml_execute or cron.monthly_ml_retrain) locally with optional ticker override, and summarise the structured log output. Delegates to the `cron-runner` subagent so training/trade logs stay out of the main context.
-argument-hint: daily|monthly [TICKER1,TICKER2,...]
+description: Manually run a cron job (cron.daily_ml_execute, cron.monthly_ml_retrain, or the scheduler.alerts knowledge_health_job) locally with optional ticker override, and summarise the structured log output. Delegates to the `cron-runner` subagent so training/trade logs stay out of the main context.
+argument-hint: daily|monthly|knowledge-health [TICKER1,TICKER2,...]
 tools: []
 ---
 
@@ -10,14 +10,15 @@ returns only the parsed summary of the final structured log line.
 
 ## Arguments
 
-- First arg (required): `daily` or `monthly`.
+- First arg (required): `daily`, `monthly`, or `knowledge-health`.
 - Second arg (optional): comma-separated ticker list (forwarded as
   `WF_TICKERS` for the subprocess only; never mutates the user's shell).
+  Ignored for `knowledge-health` (the job reads no ticker context).
 
 Reject anything else with:
 
 ```
-/run-cron daily|monthly [TICKER1,TICKER2,...]
+/run-cron daily|monthly|knowledge-health [TICKER1,TICKER2,...]
 ```
 
 ## Dispatch

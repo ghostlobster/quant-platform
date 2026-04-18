@@ -2,7 +2,10 @@
 Quant Platform — Main Streamlit Entry Point
 Run with: streamlit run app.py
 """
+import os as _bootstrap_os
+
 import streamlit as st
+import structlog as _bootstrap_structlog
 
 import config
 from broker.paper_trader import init_paper_tables
@@ -20,7 +23,7 @@ from pages import (
     screener,
     shared,
 )
-from scheduler.alerts import init_alerts_table
+from scheduler.alerts import init_alerts_table, start_knowledge_health_scheduler
 
 # ── App bootstrap ─────────────────────────────────────────────────────────────
 config.configure_logging()
@@ -28,6 +31,19 @@ init_db()
 init_paper_tables()
 init_alerts_table()
 init_journal_table()
+
+# Opt-in hourly knowledge health check (#116). Requires the operator to set
+# ENABLE_KNOWLEDGE_HEALTH_JOB=1 so dev sessions don't get surprise background
+# jobs. KNOWLEDGE_HEALTH_CRON / KNOWLEDGE_HEALTH_ENABLED fine-tune the schedule.
+if _bootstrap_os.environ.get("ENABLE_KNOWLEDGE_HEALTH_JOB", "").strip().lower() in (
+    "1", "true", "yes", "on",
+):
+    try:
+        start_knowledge_health_scheduler()
+    except Exception as _exc:
+        _bootstrap_structlog.get_logger(__name__).warning(
+            "knowledge_health_job: bootstrap failed", error=str(_exc),
+        )
 
 st.set_page_config(
     page_title="Quant Platform",
