@@ -358,6 +358,32 @@ pytest tests/test_backtester.py::test_sma_crossover -v
 
 ---
 
+## Plan Review Workflow
+
+Before implementing a non-trivial plan, run the plan through the
+[`trading-philosophy-reviewer`](.claude/agents/trading-philosophy-reviewer.md)
+sub-agent. It audits the draft against `TRADING_PHILOSOPHY.md` (three
+pillars, decision stack §7, anti-patterns §10) and the codebase
+conventions above (DI via `providers/`, `data/fetcher.py` for OHLCV,
+`data/db.py:get_connection()` for `quant.db`, structlog, no hardcoded
+secrets), and writes a durable record under `docs/reviews/`.
+
+**Invocation (explicit, no settings hook):**
+
+```
+/review-plan /root/.claude/plans/<slug>.md
+```
+
+The slash command dispatches the sub-agent, which writes
+`docs/reviews/YYYY-MM-DD-<slug>.md` and returns a 5-line summary
+(overall verdict + per-dimension verdict). The reviewer is **advisory** —
+it never hard-blocks and never edits plan or source files. It also does
+not run `ruff`/`pytest`/`bandit`/`pip-audit`; that is the `/pre-push`
+skill's job. Address `major` findings before implementation; `minor`
+items should be acknowledged but are non-blocking.
+
+---
+
 ## Release Process
 
 ```bash
