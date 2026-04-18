@@ -164,6 +164,28 @@ def init_db() -> None:
             )
         """)
 
+        # ----- Live predictions for rolling IC (issue #115) ------------
+        # One row per (ts, ticker, model_name, horizon_d) — the score the
+        # model produced at order time, plus the realized forward-return
+        # filled in by analysis.live_ic.backfill_realized once the horizon
+        # expires. Rolling Spearman IC on this table feeds back into
+        # KnowledgeAdaptionAgent's ``live_ic`` branch.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS live_predictions (
+                ts         REAL    NOT NULL,
+                ticker     TEXT    NOT NULL,
+                model_name TEXT    NOT NULL,
+                score      REAL    NOT NULL,
+                horizon_d  INTEGER NOT NULL,
+                realized   REAL,
+                PRIMARY KEY (ts, ticker, model_name, horizon_d)
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_live_pred_model_ts
+                ON live_predictions (model_name, ts DESC)
+        """)
+
         # Seed paper_account if absent
         import os
         starting_cash = float(os.getenv("PAPER_STARTING_CASH", "100000"))

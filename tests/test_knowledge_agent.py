@@ -627,3 +627,61 @@ def test_stamp_read_write_roundtrip(tmp_path, monkeypatch):
     # Upsert semantics: second write overwrites.
     _write_stamp("retrain_fired_at", 9_999_999.0)
     assert _read_stamp("retrain_fired_at") == 9_999_999.0
+
+
+# ── Live-IC integration (#115) ────────────────────────────────────────────────
+
+def test_ic_degradation_fires_via_live_ic_module(
+    tmp_path, monkeypatch, model_paths,
+):
+    """End-to-end guard: collapsed IC computed by analysis.live_ic flips the
+    agent's verdict to retrain via the existing IC-degradation branch."""
+    # Isolate the DB so this test's rows don't leak across the suite.
+    _isolate_stamp_db(monkeypatch, tmp_path)
+
+    # Fresh pickles — without live IC the verdict would be `fresh`.
+    baseline, regime = model_paths
+    _write_pickle(baseline, {"model": object()}, age_seconds=60)
+    _write_pickle(
+        regime, {"models": {"trending_bull": 1, "trending_bear": 1,
+                             "mean_reverting": 1, "high_vol": 1}}, age_seconds=60,
+    )
+
+    # Seed live_predictions with 20 perfectly anti-correlated rows so the
+    # rolling IC comes back at -1.0 — well past the _IC_DROP_BEARISH threshold.
+    from data.db import get_connection
+    conn = get_connection()
+    base_ts = 1_700_000_000.0
+    with conn:
+        for i in range(20):
+            conn.execute(
+                "INSERT INTO live_predictions (ts, ticker, model_name, "
+                "score, horizon_d, realized) VALUES (?, ?, ?, ?, ?, ?)",
+                (base_ts + i, f"T{i:02d}", "lgbm_alpha",
+                 float(i), 5, -float(i)),
+            )
+    conn.close()
+
+    # Arm the agent: trained IC 0.05 so live/trained ratio is negative →
+    # clamped to 0.0 by _safe_ratio, well below _IC_DROP_BEARISH (0.5).
+    monkeypatch.setattr(
+        KnowledgeAdaptionAgent, "_metadata_reader",
+        staticmethod(lambda model_name: 0.05),
+    )
+
+    # Pull the rolling IC. Use window=20 to match the seeded row count —
+    # the default window=60 requires 30 warm-up rows, which is overkill
+    # for this unit-level integration test.
+    import analysis.live_ic as live_ic_mod
+    live_ic_mod._ic_cache.clear()
+    live_ic = live_ic_mod.rolling_live_ic("lgbm_alpha", window=20)
+    assert live_ic is not None
+    assert live_ic == pytest.approx(-1.0)
+
+    sig = KnowledgeAdaptionAgent().run({
+        "regime": "trending_bull",
+        "live_ic": live_ic,
+    })
+    assert sig.signal == "bearish"
+    assert sig.metadata["recommendation"] == "retrain"
+    assert "IC" in sig.reasoning

@@ -101,6 +101,20 @@ The checkpoint is also recorded in `quant.db` → `model_metadata` table.
 | ML_TRAIN_PERIOD       | 2y                         | yfinance period for training data  |
 | LGBM_ALPHA_MODEL_PATH | models/lgbm_alpha.pkl      | Path to save the model checkpoint  |
 
+## Live IC backfill (#115)
+
+`analysis/live_ic.py` persists every scored (ticker, model) row to the
+`live_predictions` SQLite table at order time. A daily
+`live_ic_backfill_job` (registered alongside `knowledge_health_job` in
+`scheduler/alerts.py`) pulls realized forward-returns via
+`data/fetcher.fetch_ohlcv` once each row's horizon has expired, then
+`rolling_live_ic("lgbm_alpha")` feeds the IC back into
+`KnowledgeAdaptionAgent` so the IC-degradation branch can actually fire.
+
+Override the daily cadence with `LIVE_IC_BACKFILL_CRON` (default
+`"30 4 * * *"`). Disable the writer by setting
+`KNOWLEDGE_RECORD_PREDICTIONS=0` (useful in unit tests and dry-runs).
+
 ## Opt-in auto-trigger from KnowledgeAdaptionAgent (#119)
 
 Setting `KNOWLEDGE_AUTO_RETRAIN=1` in the environment of whichever
