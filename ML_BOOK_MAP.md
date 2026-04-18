@@ -89,7 +89,7 @@ graph LR
 | 3 — Labeling                                 | triple-barrier, meta-labeling  |   ✅   | `analysis/triple_barrier.py`, `strategies/meta_label.py`        |
 | 4 — Sample Weights                           | concurrency-based weighting    |   ✅   | `analysis/sample_weights.py` (num_co_events, sample_uniqueness, sequential_bootstrap) |
 | 5 — Fractionally Differentiated Features     | stationarity vs memory         |   ✅   | `data/frac_diff.py`                                             |
-| 6 — Ensemble Methods                         | bagging, boosting              |   ✅   | `strategies/ensemble_signal.py`, LightGBM                       |
+| 6 — Ensemble Methods                         | bagging, boosting, adoption-aware blend |   ✅   | `strategies/ensemble_signal.py` (`blend_signals(model_names=…)` downweights stale members via `KnowledgeAdaptionAgent`), LightGBM |
 | 7 — Cross-Validation in Finance              | purged + embargoed K-fold      |   ✅   | `backtester/walk_forward.py:purged_walk_forward`                |
 | 8 — Feature Importance                       | MDI, MDA, SFI                  |   ✅   | `analysis/feature_importance.py` (mda_importance + mdi_importance) |
 | 9 — Hyperparameter Tuning                    | Bayesian + purged CV           |   ✅   | `strategies/ml_tuning.py` (Optuna TPE)                          |
