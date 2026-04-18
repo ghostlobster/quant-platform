@@ -98,6 +98,8 @@ pytest tests/ -m "integration"
 
 **CI enforces `--cov-fail-under=76`.** Keep coverage above this threshold when adding code.
 
+For a single-command CI-mirror run (ruff + pytest 76% + bandit HIGH + pip-audit) from inside Claude Code, invoke the `/pre-push` skill.
+
 ### Linting
 
 ```bash
