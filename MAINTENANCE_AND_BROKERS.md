@@ -226,6 +226,49 @@ All strategies in this platform — momentum, SMA crossover, mean reversion, pai
 
 A simple two-state regime detector (trending vs. mean-reverting) using VIX level + SPY 200-day SMA relationship would immediately let the strategy selector route signals to the right model.
 
+### 4g. Live Broker Testing (Alpaca paper)
+
+Tracking issue: [#78](https://github.com/ghostlobster/quant-platform/issues/78). Cron unit tests run with a fake broker; this runbook is the manual loop for confirming the real `BROKER_PROVIDER=alpaca` path end-to-end against a paper account.
+
+**Required environment**
+
+```bash
+export BROKER_PROVIDER=alpaca
+export ALPACA_API_KEY=...
+export ALPACA_SECRET_KEY=...
+export ALPACA_PAPER=true                  # never run this against a live account
+export WF_TICKERS="AAPL,MSFT"             # optional — defaults to the cron's universe
+export ML_MAX_POSITIONS=2                 # optional
+export ML_SCORE_THRESHOLD=0.3             # optional
+```
+
+**Procedure**
+
+```bash
+python -m cron.monthly_ml_retrain   # warm up the LightGBM checkpoint
+python -m cron.daily_ml_execute     # place paper orders
+```
+
+**Verification (Alpaca dashboard)**
+
+- Orders fill at market and appear in the paper account.
+- Position sizes honour `Kelly × regime × |score|` from `strategies/ml_execution.py`.
+- A repeat run leaves the portfolio unchanged when scores stay within `[-threshold, threshold]` (idempotency).
+
+**Automated portion**
+
+The integration test scaffolded under [`tests/test_alpaca_smoke.py`](tests/test_alpaca_smoke.py) covers the broker plumbing automatically when credentials are present:
+
+```bash
+pytest tests/test_alpaca_smoke.py -m integration -v
+```
+
+It is always skipped without `ALPACA_API_KEY` / `ALPACA_SECRET_KEY`, so it is invisible in the default `pytest -m "not integration"` CI run. The `ci.yml` integration job picks it up when those secrets are configured at the repo level.
+
+**Closing the ticket**
+
+The screenshot acceptance criterion in #78 still requires manual verification via the Alpaca dashboard — record the fills there, attach to the PR or issue, and link to the green integration-job run.
+
 ---
 
 ## 5. Enhancement Roadmap
