@@ -5,6 +5,7 @@ import pandas as pd
 from analysis.regime import (
     REGIME_METADATA,
     detect_regime,
+    is_regime_at_risk,
     kelly_regime_multiplier,
 )
 
@@ -102,6 +103,36 @@ class TestKellyRegimeMultiplier:
 
 
 # ── REGIME_METADATA ───────────────────────────────────────────────────────────
+
+class TestIsRegimeAtRisk:
+    def test_spy_at_sma_is_at_risk(self):
+        # SPY exactly equal to SMA200 → within tolerance → at_risk=True
+        assert is_regime_at_risk(spy_price=100.0, spy_sma200=100.0, vix=15.0) is True
+
+    def test_spy_within_2pct_of_sma_is_at_risk(self):
+        # +1% of SMA is within ±2% tolerance
+        assert is_regime_at_risk(spy_price=101.0, spy_sma200=100.0, vix=15.0) is True
+
+    def test_spy_far_from_sma_low_vix_not_at_risk(self):
+        # +10% SMA deviation and VIX far from 20 → safe
+        assert is_regime_at_risk(spy_price=110.0, spy_sma200=100.0, vix=15.0) is False
+
+    def test_vix_within_10pct_of_20_is_at_risk(self):
+        # VIX=19 is within ±10% of 20 → [18, 22] → at_risk=True even if SPY is far from SMA
+        assert is_regime_at_risk(spy_price=110.0, spy_sma200=100.0, vix=19.0) is True
+
+    def test_vix_at_22_is_at_risk(self):
+        # Upper boundary of [18, 22] — still at risk
+        assert is_regime_at_risk(spy_price=110.0, spy_sma200=100.0, vix=22.0) is True
+
+    def test_vix_at_25_not_at_risk(self):
+        # VIX=25 is outside ±10% of 20 and SPY is far from SMA
+        assert is_regime_at_risk(spy_price=110.0, spy_sma200=100.0, vix=25.0) is False
+
+    def test_zero_sma_returns_false(self):
+        # Guard against division by zero; fail-open
+        assert is_regime_at_risk(spy_price=100.0, spy_sma200=0.0, vix=15.0) is False
+
 
 class TestRegimeMetadata:
     def test_all_four_regimes_present(self):

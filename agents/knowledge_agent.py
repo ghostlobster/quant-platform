@@ -22,6 +22,22 @@ its output confidence and that ``strategies/ml_execution.py`` uses to scale
 the Kelly fraction.  A stale verdict also triggers a throttled alert via
 ``providers.alert`` (24h cooldown) so silent cron failures surface.
 
+Threat model (pickle path confinement)
+--------------------------------------
+``pickle.load`` executes arbitrary ``__reduce__`` code during deserialisation.
+If an attacker can control ``LGBM_ALPHA_MODEL_PATH`` /
+``LGBM_REGIME_MODELS_PATH`` they can redirect the agent (and
+``strategies/ml_signal.py``) to a crafted pickle anywhere on disk and gain
+code execution in the trading process.
+
+Environment variables are therefore treated as **operator-trusted** — they
+should only be set by the human who deploys the platform, never by
+user-supplied request data or runtime config fetched from an untrusted
+source. As defence-in-depth, every pickle load is confined to
+``_ALLOWED_ROOTS`` (repo root + system temp dir for tests) via
+``_safe_pickle_path`` / ``_confine_pickle_path``. Paths escaping those
+roots are refused before ``pickle.load`` runs.
+
 ENV vars
 --------
     LGBM_ALPHA_MODEL_PATH       path to baseline pickle
@@ -38,6 +54,7 @@ import json
 import os
 import pickle
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -65,18 +82,48 @@ _RECOMMENDATION_MULTIPLIER: dict[str, float] = {
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
+# Pickle loads are confined to these roots. The repo root covers production
+# (``models/*.pkl``); the system temp dir is needed so unit tests can stage
+# fixture pickles under ``tmp_path``. Anything outside these roots is refused
+# before ``pickle.load`` runs (see ``_confine_pickle_path``).
+_ALLOWED_ROOTS: tuple[Path, ...] = (
+    _REPO_ROOT.resolve(),
+    Path(tempfile.gettempdir()).resolve(),
+)
+
 
 def recommendation_multiplier(recommendation: str) -> float:
     """Return the confidence / sizing multiplier for a recommendation tag."""
     return _RECOMMENDATION_MULTIPLIER.get(recommendation, 1.0)
 
 
-def _resolve_path(env_var: str, default_rel: str) -> Path:
-    """Resolve a model pickle path — env override wins, else repo-relative default."""
+def _confine_pickle_path(raw_path: str | Path) -> Path:
+    """Resolve ``raw_path`` and require it under ``_ALLOWED_ROOTS``.
+
+    Raises ``ValueError`` when the resolved path escapes every allowed root.
+    Callers that load via ``pickle`` should invoke this immediately before
+    opening the file so traversal tricks (``..``, symlinks) are neutralised.
+    """
+    resolved = Path(raw_path).expanduser().resolve()
+    for root in _ALLOWED_ROOTS:
+        if resolved == root or resolved.is_relative_to(root):
+            return resolved
+    raise ValueError(
+        f"pickle path {resolved} is outside allowed roots "
+        f"{[str(r) for r in _ALLOWED_ROOTS]}; refusing to load"
+    )
+
+
+def _safe_pickle_path(env_var: str, default_rel: str) -> Path:
+    """Resolve a model pickle path — env override wins, else repo-relative
+    default — and confine it to ``_ALLOWED_ROOTS``.
+
+    Raises ``ValueError`` on escape so the caller fails closed instead of
+    silently loading from an attacker-controlled location.
+    """
     override = os.environ.get(env_var)
-    if override:
-        return Path(override).expanduser().resolve()
-    return (_REPO_ROOT / default_rel).resolve()
+    src = override if override else str(_REPO_ROOT / default_rel)
+    return _confine_pickle_path(src)
 
 
 def _age_days(path: Path, now: float) -> float | None:
@@ -94,11 +141,20 @@ def _read_regime_coverage(path: Path) -> list[str]:
     Supports both the canonical ``{"models": {...}, "is_classifier": bool}``
     payload and the legacy bare-dict format (see
     ``strategies/ml_signal.py:143–151``).
+
+    The path is re-confined to ``_ALLOWED_ROOTS`` at the load site as
+    defence-in-depth; callers should still pass a path produced by
+    ``_safe_pickle_path``.
     """
-    if not path.exists():
+    try:
+        safe_path = _confine_pickle_path(path)
+    except ValueError as exc:
+        logger.error("knowledge_agent: refusing regime-models pickle: %s", exc)
         return []
-    with open(path, "rb") as f:
-        payload = pickle.load(f)  # noqa: S301  — trusted local file
+    if not safe_path.exists():
+        return []
+    with open(safe_path, "rb") as f:
+        payload = pickle.load(f)  # noqa: S301  — confined to _ALLOWED_ROOTS above
     if isinstance(payload, dict):
         inner = payload.get("models") if "models" in payload else payload
         if isinstance(inner, dict):
@@ -154,6 +210,31 @@ def _resolve_regime(context: dict) -> str | None:
     except Exception as exc:
         logger.debug("knowledge_agent: live regime lookup failed: %s", exc)
         return None
+
+
+def _resolve_at_risk(context: dict) -> bool:
+    """Resolve the regime-boundary ``at_risk`` flag.
+
+    Precedence:
+      1. ``context['at_risk']`` — explicit caller override.
+      2. If the caller also supplied ``context['regime']`` they are running
+         offline / in tests, so we skip the live lookup and default to False
+         (boundary detection requires live SPY/VIX).
+      3. Otherwise, read the cached live regime classifier's flag.
+
+    Fail-open to ``False`` on any error so the agent does not accidentally
+    demote when the live feed is unavailable.
+    """
+    if "at_risk" in context:
+        return bool(context.get("at_risk"))
+    if "regime" in context:
+        return False
+    try:
+        from analysis.regime import get_cached_live_regime
+        return bool(get_cached_live_regime(use_llm=False).get("at_risk", False))
+    except Exception as exc:
+        logger.debug("knowledge_agent: live at_risk lookup failed: %s", exc)
+        return False
 
 
 class _Cache:
@@ -217,15 +298,28 @@ class KnowledgeAdaptionAgent:
     def _run(self, context: dict) -> AgentSignal:
         now = self._clock()
 
-        baseline_path = _resolve_path("LGBM_ALPHA_MODEL_PATH", "models/lgbm_alpha.pkl")
-        regime_path = _resolve_path(
-            "LGBM_REGIME_MODELS_PATH", "models/lgbm_regime_models.pkl"
-        )
+        try:
+            baseline_path = _safe_pickle_path(
+                "LGBM_ALPHA_MODEL_PATH", "models/lgbm_alpha.pkl"
+            )
+            regime_path = _safe_pickle_path(
+                "LGBM_REGIME_MODELS_PATH", "models/lgbm_regime_models.pkl"
+            )
+        except ValueError as exc:
+            logger.error("knowledge_agent: unsafe pickle path: %s", exc)
+            return AgentSignal(
+                agent_name=self.name,
+                signal="bearish",
+                confidence=0.8,
+                reasoning=f"refusing to load pickle from untrusted path: {exc}",
+                metadata={"recommendation": "retrain"},
+            )
 
         baseline_age = _age_days(baseline_path, now)
         regime_age = _age_days(regime_path, now)
         regime = _resolve_regime(context)
         regime_coverage = self._cache.coverage(regime_path, self._coverage_reader)
+        at_risk = _resolve_at_risk(context)
 
         trained_ic = self._metadata_reader("lgbm_alpha")
         live_ic_raw = context.get("live_ic")
@@ -243,6 +337,7 @@ class KnowledgeAdaptionAgent:
             ic_ratio=ic_ratio,
             stale_days=stale_days,
             monitor_days=monitor_days,
+            at_risk=at_risk,
         )
 
         if verdict["recommendation"] == "retrain":
@@ -259,6 +354,7 @@ class KnowledgeAdaptionAgent:
             "ic_ratio": ic_ratio,
             "stale_days": stale_days,
             "monitor_days": monitor_days,
+            "at_risk": at_risk,
         }
 
         return AgentSignal(
@@ -281,6 +377,7 @@ class KnowledgeAdaptionAgent:
         ic_ratio: float | None,
         stale_days: float,
         monitor_days: float,
+        at_risk: bool = False,
     ) -> dict[str, Any]:
         """First-match condition ladder → (signal, confidence, reasoning, recommendation)."""
         # 1. Missing baseline pickle — worst case, no model to serve.
@@ -323,7 +420,15 @@ class KnowledgeAdaptionAgent:
                 why = f"retrain window approaching ({oldest:.0f}d)"
             return _verdict("neutral", 0.5, "monitor", why)
 
-        # 5. Fresh & covered.
+        # 5. Near a regime boundary — demote fresh to monitor so consumers
+        #    downweight the signal proactively.
+        if at_risk:
+            return _verdict(
+                "neutral", 0.5, "monitor",
+                "regime near boundary — elevated coverage risk",
+            )
+
+        # 6. Fresh & covered.
         return _verdict(
             "bullish", 0.8, "fresh",
             f"models fresh ({baseline_age:.0f}d) and regime '{regime or '?'}' covered",
