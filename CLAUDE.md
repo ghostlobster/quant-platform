@@ -384,6 +384,32 @@ items should be acknowledged but are non-blocking.
 
 ---
 
+## Branch Discipline — new implementation starts a new branch
+
+Every new implementation begins on its own feature branch off `origin/main`.
+This is enforced by the [`new-branch`](.claude/skills/new-branch/SKILL.md)
+skill, which refuses to start work on `main`, on a stale feature branch, or
+with a dirty working tree.
+
+**Invocation:**
+
+```
+/new-branch <issue-number | roadmap-id | slug>
+```
+
+Naming convention — `claude/<identifier>-<kebab-slug>`:
+- Issue → `claude/issue-139-pretrade-risk-guard`
+- Roadmap ticket → `claude/p1-1-pretrade-risk-guard`
+- Free-form → `claude/<slug>-<rand4>`
+
+The skill only runs read/write git — it never edits code, never pushes,
+never commits. Together with `/pre-push` at the end of the cycle, it
+brackets every implementation. Claude is expected to invoke `/new-branch`
+as its first action whenever the user asks to start a new ticket or
+implementation.
+
+---
+
 ## Release Process
 
 ```bash
