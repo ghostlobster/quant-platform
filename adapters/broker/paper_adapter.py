@@ -131,6 +131,45 @@ class PaperBrokerAdapter:
             self._orders[order_id] = result
         return result
 
+    def place_bracket(self, intent) -> dict:
+        """Fill the parent leg and record the TP/SL/trail children."""
+        try:
+            self._guard.check(
+                intent.symbol, intent.qty, intent.side, intent.limit_price,
+            )
+        except GuardViolation as violation:
+            logger.warning(
+                "pretrade_guard_reject symbol=%s qty=%s side=%s reason=%s",
+                intent.symbol, intent.qty, intent.side, violation.reason,
+            )
+            return {
+                "symbol": intent.symbol.upper(),
+                "qty": intent.qty,
+                "side": intent.side,
+                "status": "rejected",
+                "reason": violation.reason,
+            }
+
+        price = intent.limit_price
+        if price is None:
+            try:
+                from data.fetcher import fetch_latest_price
+                info = fetch_latest_price(intent.symbol)
+                price = info.get("price") or 100.0
+            except Exception:
+                price = 100.0
+
+        from broker.paper_trader import place_bracket as _place
+        return _place(
+            intent.symbol,
+            intent.qty,
+            intent.side,
+            entry_price=price,
+            take_profit=intent.take_profit,
+            stop_loss=intent.stop_loss,
+            trail_percent=intent.trail_percent,
+        )
+
     def cancel_order(self, order_id: str) -> bool:
         # Paper orders fill immediately — nothing to cancel.
         logger.debug("PaperBrokerAdapter.cancel_order: paper orders fill instantly; no-op")
