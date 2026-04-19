@@ -67,6 +67,11 @@ from pathlib import Path
 from typing import Any
 
 from agents.base import AgentSignal
+from agents.knowledge_registry import (
+    ModelEntry,
+    build_default_registry,
+    worst_recommendation,
+)
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -488,10 +493,19 @@ class KnowledgeAdaptionAgent:
     _retrain_reader = staticmethod(_read_stamp)
     _retrain_writer = staticmethod(_write_stamp)
 
-    def __init__(self) -> None:
+    def __init__(self, registry: list | None = None) -> None:
+        """Construct the agent.
+
+        ``registry`` is an optional ``list[ModelEntry]`` that overrides
+        the default zoo registry (``agents.knowledge_registry.build_default_registry``).
+        Primarily intended for tests that want a single-entry registry,
+        but production callers can also use it to narrow the audit to
+        a subset of model families.
+        """
         self._cache = _Cache()
         self._last_alert_at: float = 0.0
         self._last_launch_alert_at: float = 0.0
+        self._registry = list(registry) if registry is not None else None
 
     # ── Main entrypoint ────────────────────────────────────────────────────
 
@@ -547,6 +561,17 @@ class KnowledgeAdaptionAgent:
         stale_days = _env_float("KNOWLEDGE_STALE_DAYS", _DEFAULT_STALE_DAYS)
         monitor_days = _env_float("KNOWLEDGE_MONITOR_DAYS", _DEFAULT_MONITOR_DAYS)
 
+        # Zoo audit (#123) — iterate every ModelEntry and produce a per-model
+        # verdict using the simplified sub-ladder (missing pickle / stale /
+        # monitor window / fresh). Regime coverage, IC ratio and drift remain
+        # baseline-only auxiliaries for now.
+        per_model: dict[str, dict[str, Any]] = {}
+        for entry in self._resolve_registry():
+            per_model[entry.name] = self._audit_entry(entry, now)
+        per_model_worst = worst_recommendation(
+            [m["recommendation"] for m in per_model.values()],
+        )
+
         verdict = self._classify(
             baseline_age=baseline_age,
             regime_age=regime_age,
@@ -559,6 +584,7 @@ class KnowledgeAdaptionAgent:
             plateau_detected=plateau_detected,
             drift_level=drift_level,
             drift_max_psi=drift_max_psi,
+            per_model_worst=per_model_worst,
         )
 
         auto_retrain_meta: dict[str, Any] | None = None
@@ -582,6 +608,8 @@ class KnowledgeAdaptionAgent:
             "drift_level": drift_level,
             "drift_max_psi": drift_max_psi,
             "drifted_features": drifted_features,
+            "per_model": per_model,
+            "per_model_worst": per_model_worst,
         }
         if auto_retrain_meta is not None:
             metadata["auto_retrain"] = auto_retrain_meta
@@ -593,6 +621,75 @@ class KnowledgeAdaptionAgent:
             reasoning=verdict["reasoning"],
             metadata=metadata,
         )
+
+    # ── Zoo registry audit (#123) ──────────────────────────────────────────
+
+    def _resolve_registry(self) -> list[ModelEntry]:
+        """Return the model registry to audit. ``None`` in ``__init__``
+        means "use the default registry", evaluated lazily so tests
+        that monkeypatch env vars affect path resolution."""
+        if self._registry is not None:
+            return self._registry
+        return build_default_registry()
+
+    def _audit_entry(
+        self, entry: ModelEntry, now: float,
+    ) -> dict[str, Any]:
+        """Produce a per-model verdict + context for ``entry``.
+
+        Sub-ladder (simplified compared to the baseline ``_classify``):
+          * path escapes the allowed roots → ``retrain`` + "unsafe path".
+          * artefact missing → ``retrain`` + "artefact missing".
+          * age > ``entry.max_age_days`` → ``retrain`` + "stale (Nd)".
+          * age > ``entry.max_age_days - 10`` → ``monitor`` + "approaching stale".
+          * otherwise → ``fresh``.
+        """
+        try:
+            resolved = _safe_pickle_path(entry.artefact_env, entry.artefact_default)
+        except ValueError as exc:
+            logger.warning(
+                "knowledge_agent: refusing zoo entry path",
+                model=entry.name, error=str(exc),
+            )
+            return {
+                "recommendation": "retrain",
+                "age_days": None,
+                "artefact_path": None,
+                "trained_ic": None,
+                "reasoning": "unsafe path",
+            }
+
+        age = _age_days(resolved, now)
+        trained_ic = self._metadata_reader(entry.metadata_name)
+
+        if age is None:
+            return {
+                "recommendation": "retrain",
+                "age_days": None,
+                "artefact_path": str(resolved),
+                "trained_ic": trained_ic,
+                "reasoning": "artefact missing",
+            }
+
+        monitor_floor = max(entry.max_age_days - 10, 0)
+        if age > entry.max_age_days:
+            recommendation = "retrain"
+            reasoning = f"stale ({age:.0f}d > {entry.max_age_days}d)"
+        elif age > monitor_floor:
+            recommendation = "monitor"
+            reasoning = f"approaching stale ({age:.0f}d)"
+        else:
+            recommendation = "fresh"
+            reasoning = f"fresh ({age:.0f}d)"
+
+        return {
+            "recommendation": recommendation,
+            "age_days": age,
+            "artefact_path": str(resolved),
+            "trained_ic": trained_ic,
+            "reasoning": reasoning,
+            "max_age_days": entry.max_age_days,
+        }
 
     # ── Classification ────────────────────────────────────────────────────
 
@@ -610,6 +707,7 @@ class KnowledgeAdaptionAgent:
         plateau_detected: bool = False,
         drift_level: str | None = None,
         drift_max_psi: float | None = None,
+        per_model_worst: str | None = None,
     ) -> dict[str, Any]:
         """First-match condition ladder → (signal, confidence, reasoning, recommendation)."""
         # 1. Missing baseline pickle — worst case, no model to serve.
@@ -688,7 +786,22 @@ class KnowledgeAdaptionAgent:
                 "IC plateau over 3 retrains — feature drift suspected",
             )
 
-        # 9. Fresh & covered.
+        # 9. Zoo escalation (#123). The baseline is fine, but another
+        #    model family in the registry wants a retrain/monitor —
+        #    surface the worst tag so the meta-agent downweights the
+        #    blend even when lgbm_alpha itself looks healthy.
+        if per_model_worst == "retrain":
+            return _verdict(
+                "bearish", 0.6, "retrain",
+                "zoo member requires retrain",
+            )
+        if per_model_worst == "monitor":
+            return _verdict(
+                "neutral", 0.5, "monitor",
+                "zoo member approaching stale",
+            )
+
+        # 10. Fresh & covered.
         return _verdict(
             "bullish", 0.8, "fresh",
             f"models fresh ({baseline_age:.0f}d) and regime '{regime or '?'}' covered",

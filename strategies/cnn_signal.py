@@ -46,6 +46,15 @@ _DEFAULT_MODEL_PATH = os.environ.get("CNN_ALPHA_MODEL_PATH", "models/cnn_alpha.p
 _TARGET_COL = "fwd_ret_5d"
 _DEFAULT_WINDOW = 16
 
+from agents.knowledge_registry import ModelEntry  # noqa: E402
+
+MODEL_ENTRY = ModelEntry(
+    name="cnn_alpha",
+    artefact_env="CNN_ALPHA_MODEL_PATH",
+    artefact_default="models/cnn_alpha.pt",
+    metadata_name="cnn_alpha",
+)
+
 
 if _TORCH_AVAILABLE:
 

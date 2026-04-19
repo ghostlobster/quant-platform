@@ -42,6 +42,15 @@ except ImportError:
 _DEFAULT_MODEL_PATH = os.environ.get("RF_LS_MODEL_PATH", "models/rf_long_short.pkl")
 _TARGET_COL = "fwd_ret_5d"
 
+from agents.knowledge_registry import ModelEntry  # noqa: E402
+
+MODEL_ENTRY = ModelEntry(
+    name="rf_long_short",
+    artefact_env="RF_LS_MODEL_PATH",
+    artefact_default="models/rf_long_short.pkl",
+    metadata_name="rf_long_short",
+)
+
 
 class RFLongShortSignal:
     """Random-Forest regressor + cross-sectional long-short portfolio builder."""

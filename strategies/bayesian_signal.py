@@ -45,6 +45,15 @@ _DEFAULT_MODEL_PATH = os.environ.get(
 )
 _TARGET_COL = "fwd_ret_5d"
 
+from agents.knowledge_registry import ModelEntry  # noqa: E402
+
+MODEL_ENTRY = ModelEntry(
+    name="bayesian_alpha",
+    artefact_env="BAYES_ALPHA_MODEL_PATH",
+    artefact_default="models/bayesian_alpha.pkl",
+    metadata_name="bayesian_alpha",
+)
+
 
 class BayesianSignal:
     """Bayesian Ridge alpha model — same interface as :class:`LinearSignal`.
