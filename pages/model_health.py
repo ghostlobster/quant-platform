@@ -161,17 +161,26 @@ def _render_inventory_panel() -> None:
         return
 
     meta = _knowledge_verdict()
-    verdict = str(meta.get("recommendation") or "fresh")
-    multiplier = recommendation_multiplier(verdict)
+    top_verdict = str(meta.get("recommendation") or "fresh")
+    per_model = meta.get("per_model") or {}
+
     now = pd.Timestamp.now("UTC").tz_localize(None)
     trained_at = pd.to_datetime(df["trained_at"], unit="s")
     df = df.copy()
     df["trained_at"] = trained_at
     df["days_old"] = (now - trained_at).dt.total_seconds() / 86400.0
-    # Verdict + multiplier are agent-wide (one knowledge agent per process);
-    # attach per row so the operator sees them alongside every model.
-    df["verdict"] = verdict
-    df["kelly_mult"] = multiplier
+
+    # #123 — per-model verdict pulled from ``metadata["per_model"]`` when
+    # present. Models not in the registry fall back to the top-level
+    # verdict so the operator still sees something informative.
+    def _verdict_for(name: str) -> str:
+        entry = per_model.get(str(name))
+        if entry and "recommendation" in entry:
+            return str(entry["recommendation"])
+        return top_verdict
+
+    df["verdict"] = [_verdict_for(n) for n in df["model_name"]]
+    df["kelly_mult"] = [recommendation_multiplier(v) for v in df["verdict"]]
 
     display_cols = [
         "model_name", "trained_at", "test_ic", "test_ic_delta",
@@ -181,8 +190,8 @@ def _render_inventory_panel() -> None:
         df[display_cols], use_container_width=True, hide_index=True,
     )
     st.caption(
-        f"Agent verdict: **{verdict}** → Kelly multiplier **{multiplier:.2f}**. "
-        f"fresh=1.0 · monitor=0.7 · retrain=0.4."
+        f"Top-level verdict: **{top_verdict}** (worst across the model zoo). "
+        f"Per-model verdict + multiplier: fresh=1.0 · monitor=0.7 · retrain=0.4."
     )
 
 

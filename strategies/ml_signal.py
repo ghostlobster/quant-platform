@@ -58,6 +58,19 @@ _DEFAULT_MODEL_PATH = os.environ.get("LGBM_ALPHA_MODEL_PATH", "models/lgbm_alpha
 _DEFAULT_REGIME_MODELS_PATH = os.environ.get(
     "LGBM_REGIME_MODELS_PATH", "models/lgbm_regime_models.pkl"
 )
+
+# KnowledgeAdaptionAgent registry entry (#123). Declared at module level
+# so ``agents.knowledge_registry.build_default_registry`` can collect it
+# without runtime introspection.
+from agents.knowledge_registry import ModelEntry  # noqa: E402
+
+MODEL_ENTRY = ModelEntry(
+    name="lgbm_alpha",
+    artefact_env="LGBM_ALPHA_MODEL_PATH",
+    artefact_default="models/lgbm_alpha.pkl",
+    metadata_name="lgbm_alpha",
+    is_baseline=True,
+)
 _TARGET_COL = "fwd_ret_5d"
 _TB_TARGET_COL = "tb_bin"
 _TB_RET_COL = "tb_ret"

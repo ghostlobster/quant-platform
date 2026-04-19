@@ -54,6 +54,31 @@ def isolate_metadata(monkeypatch):
     )
 
 
+@pytest.fixture(autouse=True)
+def _default_registry_lgbm_only(monkeypatch):
+    """Pre-#123 tests only know about the LGBM baseline — restrict the
+    default registry so their single-model assertions keep holding.
+
+    The new ``TestZooRegistry`` cases below pass an explicit ``registry=``
+    kwarg, which the agent honours over the default.
+    """
+    from agents.knowledge_registry import ModelEntry
+
+    lgbm_only = [
+        ModelEntry(
+            name="lgbm_alpha",
+            artefact_env="LGBM_ALPHA_MODEL_PATH",
+            artefact_default="models/lgbm_alpha.pkl",
+            metadata_name="lgbm_alpha",
+            is_baseline=True,
+        ),
+    ]
+    monkeypatch.setattr(
+        "agents.knowledge_agent.build_default_registry",
+        lambda: list(lgbm_only),
+    )
+
+
 # ── _safe_ratio ──────────────────────────────────────────────────────────────
 
 def test_safe_ratio_handles_zero_and_sign_flip():
@@ -823,3 +848,139 @@ def test_drift_from_feature_frame_end_to_end(
     })
     assert sig.metadata["recommendation"] == "retrain"
     assert sig.metadata["drift_level"] == "retrain"
+
+
+# ── Zoo registry integration (#123) ──────────────────────────────────────────
+
+from agents.knowledge_registry import ModelEntry  # noqa: E402
+
+
+class TestZooRegistry:
+    """Verify the multi-model audit loop; per-model verdicts + worst-case aggregation."""
+
+    def _lgbm_only(self) -> list[ModelEntry]:
+        return [
+            ModelEntry(
+                name="lgbm_alpha",
+                artefact_env="LGBM_ALPHA_MODEL_PATH",
+                artefact_default="models/lgbm_alpha.pkl",
+                metadata_name="lgbm_alpha",
+                is_baseline=True,
+            ),
+        ]
+
+    def _lgbm_plus_zoo(self, zoo_env: str, zoo_default: str) -> list[ModelEntry]:
+        return self._lgbm_only() + [
+            ModelEntry(
+                name="bayesian_alpha",
+                artefact_env=zoo_env,
+                artefact_default=zoo_default,
+                metadata_name="bayesian_alpha",
+            ),
+        ]
+
+    def test_registry_injection_returns_per_model(
+        self, model_paths, isolate_metadata,
+    ):
+        baseline, regime = model_paths
+        _write_pickle(baseline, {"model": object()}, age_seconds=60)
+        _write_pickle(
+            regime, {"models": {"trending_bull": 1, "trending_bear": 1,
+                                 "mean_reverting": 1, "high_vol": 1}},
+            age_seconds=60,
+        )
+        agent = KnowledgeAdaptionAgent(registry=self._lgbm_only())
+        sig = agent.run({"regime": "trending_bull"})
+        assert set(sig.metadata["per_model"].keys()) == {"lgbm_alpha"}
+
+    def test_per_model_worst_case_forces_retrain(
+        self, tmp_path, monkeypatch, model_paths, isolate_metadata,
+    ):
+        # Baseline is fresh; inject a stale zoo entry → top-level retrain.
+        baseline, regime = model_paths
+        _write_pickle(baseline, {"model": object()}, age_seconds=60)
+        _write_pickle(
+            regime, {"models": {"trending_bull": 1, "trending_bear": 1,
+                                 "mean_reverting": 1, "high_vol": 1}},
+            age_seconds=60,
+        )
+        zoo_path = tmp_path / "bayesian_stale.pkl"
+        _write_pickle(zoo_path, {"model": object()}, age_seconds=60 * 86400)
+        monkeypatch.setenv("BAYES_ALPHA_MODEL_PATH", str(zoo_path))
+
+        registry = self._lgbm_plus_zoo(
+            "BAYES_ALPHA_MODEL_PATH", "models/bayesian_alpha.pkl",
+        )
+        agent = KnowledgeAdaptionAgent(registry=registry)
+        sig = agent.run({"regime": "trending_bull"})
+
+        assert sig.metadata["per_model"]["lgbm_alpha"]["recommendation"] == "fresh"
+        assert sig.metadata["per_model"]["bayesian_alpha"]["recommendation"] == "retrain"
+        assert sig.metadata["per_model_worst"] == "retrain"
+        assert sig.metadata["recommendation"] == "retrain"
+        assert "zoo member requires retrain" in sig.reasoning
+
+    def test_per_model_monitor_demotes_fresh(
+        self, tmp_path, monkeypatch, model_paths, isolate_metadata,
+    ):
+        baseline, regime = model_paths
+        _write_pickle(baseline, {"model": object()}, age_seconds=60)
+        _write_pickle(
+            regime, {"models": {"trending_bull": 1, "trending_bear": 1,
+                                 "mean_reverting": 1, "high_vol": 1}},
+            age_seconds=60,
+        )
+        # 40 days old → inside the monitor band for the default max_age_days=45
+        zoo_path = tmp_path / "bayesian_monitor.pkl"
+        _write_pickle(zoo_path, {"model": object()}, age_seconds=40 * 86400)
+        monkeypatch.setenv("BAYES_ALPHA_MODEL_PATH", str(zoo_path))
+
+        registry = self._lgbm_plus_zoo(
+            "BAYES_ALPHA_MODEL_PATH", "models/bayesian_alpha.pkl",
+        )
+        agent = KnowledgeAdaptionAgent(registry=registry)
+        sig = agent.run({"regime": "trending_bull"})
+
+        assert sig.metadata["per_model"]["bayesian_alpha"]["recommendation"] == "monitor"
+        assert sig.metadata["per_model_worst"] == "monitor"
+        assert sig.metadata["recommendation"] == "monitor"
+        assert "zoo member approaching stale" in sig.reasoning
+
+    def test_zoo_entry_unsafe_path_marks_retrain(
+        self, monkeypatch, model_paths, isolate_metadata,
+    ):
+        baseline, regime = model_paths
+        _write_pickle(baseline, {"model": object()}, age_seconds=60)
+        _write_pickle(
+            regime, {"models": {"trending_bull": 1, "trending_bear": 1,
+                                 "mean_reverting": 1, "high_vol": 1}},
+            age_seconds=60,
+        )
+        monkeypatch.setenv("BAYES_ALPHA_MODEL_PATH", "/etc/passwd")
+
+        registry = self._lgbm_plus_zoo(
+            "BAYES_ALPHA_MODEL_PATH", "models/bayesian_alpha.pkl",
+        )
+        agent = KnowledgeAdaptionAgent(registry=registry)
+        sig = agent.run({"regime": "trending_bull"})
+
+        bayes = sig.metadata["per_model"]["bayesian_alpha"]
+        assert bayes["recommendation"] == "retrain"
+        assert bayes["reasoning"] == "unsafe path"
+        assert sig.metadata["recommendation"] == "retrain"
+
+    def test_default_registry_used_when_none_passed(
+        self, model_paths, isolate_metadata,
+    ):
+        """With the autouse fixture, the default registry is the lgbm-only
+        stub — confirm the agent consults it rather than an empty list."""
+        baseline, regime = model_paths
+        _write_pickle(baseline, {"model": object()}, age_seconds=60)
+        _write_pickle(
+            regime, {"models": {"trending_bull": 1, "trending_bear": 1,
+                                 "mean_reverting": 1, "high_vol": 1}},
+            age_seconds=60,
+        )
+        agent = KnowledgeAdaptionAgent()
+        sig = agent.run({"regime": "trending_bull"})
+        assert "lgbm_alpha" in sig.metadata["per_model"]

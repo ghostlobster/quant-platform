@@ -569,6 +569,36 @@ single missing regime.
 `metadata["drifted_features"]` are surfaced on every agent run so the
 Model Health tab (#121) can display them.
 
+### 11.7 Model zoo registry (#123)
+
+`KnowledgeAdaptionAgent` used to audit only the two LightGBM pickles.
+The repo ships several other model families (bayesian, ridge, mlp,
+cnn, lstm, rf-long-short); stale members silently polluted the
+ensemble blend.
+
+`agents/knowledge_registry.py::ModelEntry` is the immutable per-model
+record — name, env var that overrides the artefact path, repo-relative
+default, `model_metadata.model_name` string, and staleness budget.
+Each strategy module declares its own `MODEL_ENTRY` constant so the
+registry stays declarative (see
+`strategies/ml_signal.py:MODEL_ENTRY` for the baseline template).
+
+`build_default_registry()` collects every strategy's entry at runtime;
+each import is wrapped in `try / except` so a missing optional
+dependency (torch for `cnn_signal` / `dl_signal`, for example) drops
+that single entry rather than crashing the whole audit.
+
+The agent loops over the registry, writes a per-model verdict into
+`metadata["per_model"][name]`, and reports the **worst** verdict
+(`retrain` > `monitor` > `fresh`) as the top-level `recommendation`
+so `MetaAgent`'s existing multiplier still works. Adding a new family
+is two lines: declare `MODEL_ENTRY` in the strategy module and list
+the env var in `.env.example`.
+
+Operators can opt into a narrower audit surface by constructing the
+agent with an explicit registry (`KnowledgeAdaptionAgent(registry=[…])`),
+which is also what the test suite uses.
+
 ### 11.3 Opt-in auto-retrain trigger (#119)
 
 **Default: off.** Set `KNOWLEDGE_AUTO_RETRAIN=1` in the environment of

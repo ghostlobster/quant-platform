@@ -58,6 +58,18 @@ except ImportError:
 _DEFAULT_MODEL_PATH = os.environ.get("DL_ALPHA_MODEL_PATH", "models/dl_alpha.pt")
 _TARGET_COL = "fwd_ret_5d"
 _DEFAULT_WINDOW = 10
+
+from agents.knowledge_registry import ModelEntry  # noqa: E402
+
+# dl_signal has no `_write_metadata` today — the registry entry still
+# exists so the agent audits the pickle age + surfaces the model in
+# per_model metadata. trained_ic lookups will fall back to None.
+MODEL_ENTRY = ModelEntry(
+    name="dl_lstm",
+    artefact_env="DL_ALPHA_MODEL_PATH",
+    artefact_default="models/dl_alpha.pt",
+    metadata_name="dl_lstm",
+)
 _DEFAULT_HIDDEN = 32
 
 

@@ -39,6 +39,15 @@ except ImportError:
 _DEFAULT_MODEL_PATH = os.environ.get("RIDGE_ALPHA_MODEL_PATH", "models/ridge_alpha.pkl")
 _TARGET_COL = "fwd_ret_5d"
 
+from agents.knowledge_registry import ModelEntry  # noqa: E402
+
+MODEL_ENTRY = ModelEntry(
+    name="ridge_alpha",
+    artefact_env="RIDGE_ALPHA_MODEL_PATH",
+    artefact_default="models/ridge_alpha.pkl",
+    metadata_name="ridge_alpha",
+)
+
 
 class LinearSignal:
     """
