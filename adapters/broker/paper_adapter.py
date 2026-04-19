@@ -9,6 +9,8 @@ import logging
 import threading
 from typing import Optional
 
+from risk.pretrade_guard import GuardLimits, GuardViolation, PreTradeGuard
+
 logger = logging.getLogger(__name__)
 
 # Thread-safe singleton init guard
@@ -35,6 +37,7 @@ class PaperBrokerAdapter:
         self._orders: dict[str, dict] = {}  # local order store (in-memory)
         self._order_counter = 0
         self._lock = threading.Lock()
+        self._guard = PreTradeGuard(GuardLimits.from_env(), self)
 
     def get_account_info(self) -> dict:
         from broker.paper_trader import get_account
@@ -64,6 +67,22 @@ class PaperBrokerAdapter:
         order_type: str = "market",
         limit_price: Optional[float] = None,
     ) -> dict:
+        try:
+            self._guard.check(symbol, qty, side, limit_price)
+        except GuardViolation as violation:
+            logger.warning(
+                "pretrade_guard_reject symbol=%s qty=%s side=%s reason=%s",
+                symbol, qty, side, violation.reason,
+            )
+            return {
+                "symbol": symbol.upper(),
+                "qty": qty,
+                "side": side,
+                "order_type": order_type,
+                "status": "rejected",
+                "reason": violation.reason,
+            }
+
         from broker.paper_trader import buy, sell
         # For paper trading we need a price — use limit_price or fetch live price.
         price = limit_price

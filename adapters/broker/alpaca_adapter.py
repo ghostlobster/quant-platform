@@ -9,12 +9,16 @@ import logging
 from typing import Optional
 
 import broker.alpaca_bridge as _bridge
+from risk.pretrade_guard import GuardLimits, GuardViolation, PreTradeGuard
 
 logger = logging.getLogger(__name__)
 
 
 class AlpacaBrokerAdapter:
     """BrokerProvider backed by the existing Alpaca bridge."""
+
+    def __init__(self) -> None:
+        self._guard = PreTradeGuard(GuardLimits.from_env(), self)
 
     def get_account_info(self) -> dict:
         result = _bridge.get_account()
@@ -43,6 +47,22 @@ class AlpacaBrokerAdapter:
         order_type: str = "market",
         limit_price: Optional[float] = None,
     ) -> dict:
+        try:
+            self._guard.check(symbol, qty, side, limit_price)
+        except GuardViolation as violation:
+            logger.warning(
+                "pretrade_guard_reject symbol=%s qty=%s side=%s reason=%s",
+                symbol, qty, side, violation.reason,
+            )
+            return {
+                "symbol": symbol.upper(),
+                "qty": qty,
+                "side": side,
+                "order_type": order_type,
+                "status": "rejected",
+                "reason": violation.reason,
+            }
+
         if order_type != "market":
             logger.warning(
                 "AlpacaBrokerAdapter: only market orders supported; "
