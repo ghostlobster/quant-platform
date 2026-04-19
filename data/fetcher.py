@@ -128,9 +128,20 @@ def fetch_ohlcv(ticker: str, period: str = "6mo") -> pd.DataFrame:
     init_db()  # no-op if tables already exist
     ticker = ticker.upper().strip()
 
-    # --- Try cache first ---
+    # --- Try DuckDB columnar cache when TSDB_PROVIDER=duckdb (P1.5) ---
+    from data import duckdb_cache as _duckdb_cache
+    if _duckdb_cache.is_active():
+        cached = _duckdb_cache.read(ticker, period, _ttl_for(period))
+        if cached is not None:
+            return cached
+
+    # --- Try SQLite JSON cache ---
     cached = _cache_read(ticker, period)
     if cached is not None:
+        # Warm the DuckDB cache on the first hit so subsequent bulk reads
+        # can fan out through the columnar path.
+        if _duckdb_cache.is_active():
+            _duckdb_cache.write(ticker, period, cached)
         return cached
 
     # --- Network fetch ---
@@ -142,8 +153,10 @@ def fetch_ohlcv(ticker: str, period: str = "6mo") -> pd.DataFrame:
 
     df = _flatten_columns(raw)
 
-    # --- Persist to cache ---
+    # --- Persist to both caches ---
     _cache_write(ticker, period, df)
+    if _duckdb_cache.is_active():
+        _duckdb_cache.write(ticker, period, df)
 
     return df
 
