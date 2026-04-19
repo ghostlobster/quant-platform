@@ -3,8 +3,9 @@ providers/market_data.py — MarketDataProvider protocol and factory.
 
 ENV vars
 --------
-    MARKET_DATA_PROVIDER   alpaca | yfinance | mock  (default: yfinance)
+    MARKET_DATA_PROVIDER   alpaca | polygon | yfinance | mock  (default: yfinance)
     ALPACA_API_KEY, ALPACA_SECRET_KEY  (required for alpaca adapter)
+    POLYGON_API_KEY                     (required for polygon adapter)
 """
 from __future__ import annotations
 
@@ -56,7 +57,7 @@ def get_market_data(provider: Optional[str] = None) -> MarketDataProvider:
     ----------
     provider : str, optional
         Override the MARKET_DATA_PROVIDER env var.  One of:
-        ``alpaca``, ``yfinance``, ``mock``.
+        ``alpaca``, ``polygon``, ``yfinance``, ``mock``.
 
     Raises
     ------
@@ -69,6 +70,9 @@ def get_market_data(provider: Optional[str] = None) -> MarketDataProvider:
     if name == "alpaca":
         from adapters.market_data.alpaca_adapter import AlpacaMarketDataAdapter
         return AlpacaMarketDataAdapter()
+    if name == "polygon":
+        from adapters.market_data.polygon_adapter import PolygonAdapter
+        return PolygonAdapter()
     if name == "yfinance":
         from adapters.market_data.yfinance_adapter import YFinanceAdapter
         return YFinanceAdapter()
@@ -77,5 +81,5 @@ def get_market_data(provider: Optional[str] = None) -> MarketDataProvider:
         return MockMarketDataAdapter()
     raise ValueError(
         f"Unknown market data provider: {name!r}. "
-        "Valid options: alpaca, yfinance, mock"
+        "Valid options: alpaca, polygon, yfinance, mock"
     )
