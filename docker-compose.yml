@@ -61,3 +61,19 @@ services:
     restart: unless-stopped
     depends_on:
       - prometheus
+
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.22.1
+    ports:
+      - "5000:5000"
+    command: >
+      mlflow server
+      --host 0.0.0.0
+      --port 5000
+      --backend-store-uri sqlite:///mlruns/mlflow.db
+      --default-artifact-root /mlruns/artifacts
+    volumes:
+      - ./mlruns:/mlruns
+    environment:
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+    restart: unless-stopped
