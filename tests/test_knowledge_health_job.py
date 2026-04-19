@@ -106,11 +106,13 @@ def test_scheduler_registers_hourly_job(monkeypatch):
 
     monkeypatch.delenv("KNOWLEDGE_HEALTH_ENABLED", raising=False)
     monkeypatch.delenv("KNOWLEDGE_HEALTH_CRON", raising=False)
+    monkeypatch.setenv("RISK_EXPORTER_ENABLED", "0")
     scheduler = alerts.start_knowledge_health_scheduler(paused=True)
     try:
         assert scheduler is not None
         jobs = {job.id: job for job in scheduler.get_jobs()}
         # Expected jobs: health check (#116) + live IC backfill (#115).
+        # Risk exporter (#140) is opt-in and disabled above for this case.
         assert set(jobs) == {"knowledge_health_job", "live_ic_backfill_job"}
         health_job = jobs["knowledge_health_job"]
         # Default cron is top-of-hour; confirm the trigger reflects that.
