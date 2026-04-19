@@ -82,6 +82,55 @@ class AlpacaBrokerAdapter:
             "filled_avg_price": order.filled_avg_price,
         }
 
+    def place_bracket(self, intent) -> dict:
+        """Route a bracket intent through the Alpaca bracket-order endpoint."""
+        try:
+            self._guard.check(
+                intent.symbol, intent.qty, intent.side, intent.limit_price,
+            )
+        except GuardViolation as violation:
+            logger.warning(
+                "pretrade_guard_reject symbol=%s qty=%s side=%s reason=%s",
+                intent.symbol, intent.qty, intent.side, violation.reason,
+            )
+            return {
+                "symbol": intent.symbol.upper(),
+                "qty": intent.qty,
+                "side": intent.side,
+                "status": "rejected",
+                "reason": violation.reason,
+            }
+
+        order = _bridge.place_bracket_order(
+            intent.symbol,
+            intent.qty,
+            intent.side,
+            take_profit=intent.take_profit,
+            stop_loss=intent.stop_loss,
+            trail_percent=intent.trail_percent,
+        )
+        if order is None:
+            return {
+                "status": "failed",
+                "symbol": intent.symbol.upper(),
+                "qty": intent.qty,
+                "side": intent.side,
+            }
+        return {
+            "order_id": order.order_id,
+            "symbol": order.ticker,
+            "qty": order.qty,
+            "side": order.side,
+            "order_type": order.order_type,
+            "status": order.status,
+            "filled_avg_price": order.filled_avg_price,
+            "children": {
+                "take_profit": intent.take_profit,
+                "stop_loss": intent.stop_loss,
+                "trail_percent": intent.trail_percent,
+            },
+        }
+
     def cancel_order(self, order_id: str) -> bool:
         # alpaca_bridge only exposes cancel_all; delegate and warn.
         logger.warning(

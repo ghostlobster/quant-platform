@@ -85,6 +85,28 @@ def init_paper_tables() -> None:
                 realised_pnl  REAL               -- NULL for buys
             )
         """)
+        # P1.3 — bracket / OCO / trailing-stop child orders. Parent fills
+        # immediately via buy()/sell(); this table tracks the pending
+        # take-profit / stop-loss / trailing-stop legs until check_brackets()
+        # fires them.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS paper_bracket_orders (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                parent_order_id TEXT    NOT NULL,
+                ticker          TEXT    NOT NULL,
+                parent_side     TEXT    NOT NULL,  -- BUY | SELL (the opened side)
+                shares          REAL    NOT NULL,
+                parent_price    REAL    NOT NULL,
+                take_profit     REAL,
+                stop_loss       REAL,
+                trail_percent   REAL,
+                peak_price      REAL,              -- running watermark for trailing stop
+                status          TEXT    NOT NULL,  -- pending | filled | cancelled
+                created_at      REAL    NOT NULL,
+                closed_at       REAL,
+                close_reason    TEXT               -- take_profit | stop_loss | trail | manual
+            )
+        """)
 
         # Seed account row if absent
         existing = conn.execute("SELECT id FROM paper_account WHERE id=1").fetchone()
@@ -554,3 +576,231 @@ def execute_algo(
         logger.warning("Failed to log execution analytics: %s", _log_exc)
 
     return result
+
+
+# ── P1.3 — bracket / OCO / trailing-stop simulation ──────────────────────────
+
+def place_bracket(
+    ticker: str,
+    shares: float,
+    side: str,
+    entry_price: float,
+    take_profit: Optional[float] = None,
+    stop_loss: Optional[float] = None,
+    trail_percent: Optional[float] = None,
+) -> dict:
+    """Fill a bracket-order parent and record the pending children.
+
+    The parent market leg is executed immediately via ``buy``/``sell`` so
+    the simulator behaves identically to a live bracket that fills
+    instantly. Children (TP / SL / trailing stop) stay pending in
+    ``paper_bracket_orders`` until :func:`check_brackets` evaluates them
+    against a current-price feed.
+    """
+    side_norm = side.lower().strip()
+    if side_norm not in ("buy", "sell"):
+        raise ValueError(f"side must be 'buy' or 'sell', got {side!r}")
+    if take_profit is None and stop_loss is None and trail_percent is None:
+        raise ValueError(
+            "place_bracket requires at least one of take_profit, "
+            "stop_loss, trail_percent"
+        )
+
+    # Fill the parent leg.
+    if side_norm == "buy":
+        parent = buy(ticker, shares, entry_price)
+    else:
+        parent = sell(ticker, shares, entry_price)
+
+    parent_order_id = f"paper-bracket-{int(time.time() * 1000)}"
+    now = time.time()
+
+    conn = get_connection()
+    try:
+        with conn:
+            cur = conn.execute(
+                """
+                INSERT INTO paper_bracket_orders (
+                    parent_order_id, ticker, parent_side, shares,
+                    parent_price, take_profit, stop_loss, trail_percent,
+                    peak_price, status, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+                """,
+                (
+                    parent_order_id,
+                    ticker.upper().strip(),
+                    side_norm.upper(),
+                    float(shares),
+                    float(entry_price),
+                    take_profit,
+                    stop_loss,
+                    trail_percent,
+                    float(entry_price),
+                    now,
+                ),
+            )
+            bracket_id = cur.lastrowid
+    finally:
+        conn.close()
+
+    logger.info(
+        "Paper bracket opened id=%d parent=%s side=%s tp=%s sl=%s trail=%s",
+        bracket_id, parent_order_id, side_norm, take_profit, stop_loss, trail_percent,
+    )
+
+    return {
+        "order_id": parent_order_id,
+        "bracket_id": bracket_id,
+        "ticker": ticker.upper().strip(),
+        "side": side_norm,
+        "qty": float(shares),
+        "status": "parent_filled",
+        "parent_fill": parent,
+        "children": {
+            "take_profit": take_profit,
+            "stop_loss": stop_loss,
+            "trail_percent": trail_percent,
+        },
+    }
+
+
+def _close_bracket(
+    conn,
+    row: sqlite3.Row,
+    reason: str,
+    fill_price: float,
+) -> dict:
+    """Internal: close an open bracket by flipping the parent side."""
+    closing_side = "sell" if row["parent_side"].lower() == "buy" else "buy"
+    if closing_side == "sell":
+        fill = sell(row["ticker"], row["shares"], fill_price)
+    else:
+        fill = buy(row["ticker"], row["shares"], fill_price)
+
+    conn.execute(
+        """
+        UPDATE paper_bracket_orders
+        SET status='filled', closed_at=?, close_reason=?
+        WHERE id=?
+        """,
+        (time.time(), reason, row["id"]),
+    )
+    return {
+        "bracket_id": row["id"],
+        "ticker": row["ticker"],
+        "shares": row["shares"],
+        "reason": reason,
+        "fill_price": fill_price,
+        "child_fill": fill,
+    }
+
+
+def check_brackets(current_prices: dict[str, float]) -> list[dict]:
+    """Evaluate every pending bracket against ``current_prices``.
+
+    Fires take-profit / stop-loss / trailing-stop children when triggered;
+    updates ``peak_price`` on trailing brackets on every tick. Returns a
+    list of filled child orders (empty when nothing fires).
+    """
+    conn = get_connection()
+    fires: list[dict] = []
+    try:
+        rows = conn.execute(
+            "SELECT * FROM paper_bracket_orders WHERE status='pending'"
+        ).fetchall()
+        for row in rows:
+            ticker = row["ticker"]
+            price = current_prices.get(ticker)
+            if price is None:
+                continue
+            price = float(price)
+
+            parent_side = row["parent_side"].lower()
+            tp = row["take_profit"]
+            sl = row["stop_loss"]
+            trail = row["trail_percent"]
+            peak = row["peak_price"] if row["peak_price"] is not None else row["parent_price"]
+
+            if parent_side == "buy":
+                # Long bracket — TP fires when price >= tp, SL / trail fire below.
+                if tp is not None and price >= float(tp):
+                    with conn:
+                        fires.append(_close_bracket(conn, row, "take_profit", price))
+                    continue
+                if sl is not None and price <= float(sl):
+                    with conn:
+                        fires.append(_close_bracket(conn, row, "stop_loss", price))
+                    continue
+                if trail is not None:
+                    new_peak = max(peak, price)
+                    if new_peak != peak:
+                        with conn:
+                            conn.execute(
+                                "UPDATE paper_bracket_orders SET peak_price=? WHERE id=?",
+                                (new_peak, row["id"]),
+                            )
+                        peak = new_peak
+                    trigger = peak * (1.0 - float(trail))
+                    if price <= trigger:
+                        with conn:
+                            fires.append(_close_bracket(conn, row, "trail", price))
+                        continue
+            else:
+                # Short bracket — TP fires when price <= tp, SL / trail above.
+                if tp is not None and price <= float(tp):
+                    with conn:
+                        fires.append(_close_bracket(conn, row, "take_profit", price))
+                    continue
+                if sl is not None and price >= float(sl):
+                    with conn:
+                        fires.append(_close_bracket(conn, row, "stop_loss", price))
+                    continue
+                if trail is not None:
+                    new_peak = min(peak, price)
+                    if new_peak != peak:
+                        with conn:
+                            conn.execute(
+                                "UPDATE paper_bracket_orders SET peak_price=? WHERE id=?",
+                                (new_peak, row["id"]),
+                            )
+                        peak = new_peak
+                    trigger = peak * (1.0 + float(trail))
+                    if price >= trigger:
+                        with conn:
+                            fires.append(_close_bracket(conn, row, "trail", price))
+                        continue
+    finally:
+        conn.close()
+    return fires
+
+
+def cancel_bracket(bracket_id: int) -> bool:
+    """Mark a pending bracket cancelled. Returns True when a row was updated."""
+    conn = get_connection()
+    try:
+        with conn:
+            cur = conn.execute(
+                """
+                UPDATE paper_bracket_orders
+                SET status='cancelled', closed_at=?, close_reason='manual'
+                WHERE id=? AND status='pending'
+                """,
+                (time.time(), bracket_id),
+            )
+            return cur.rowcount > 0
+    finally:
+        conn.close()
+
+
+def get_pending_brackets() -> list[dict]:
+    """Return every pending bracket row as a list of dicts."""
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM paper_bracket_orders WHERE status='pending' "
+            "ORDER BY created_at ASC"
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()

@@ -73,6 +73,25 @@ class IBKRAdapter:
             }
         raise NotImplementedError("IBKRAdapter: full implementation pending Phase 2")
 
+    def place_bracket(self, intent) -> dict:
+        try:
+            self._guard.check(
+                intent.symbol, intent.qty, intent.side, intent.limit_price,
+            )
+        except GuardViolation as violation:
+            logger.warning(
+                "pretrade_guard_reject symbol=%s qty=%s side=%s reason=%s",
+                intent.symbol, intent.qty, intent.side, violation.reason,
+            )
+            return {
+                "symbol": intent.symbol.upper(),
+                "qty": intent.qty,
+                "side": intent.side,
+                "status": "rejected",
+                "reason": violation.reason,
+            }
+        raise NotImplementedError("IBKRAdapter: full implementation pending Phase 2")
+
     def cancel_order(self, order_id: str) -> bool:
         raise NotImplementedError("IBKRAdapter: full implementation pending Phase 2")
 
