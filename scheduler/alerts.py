@@ -605,6 +605,26 @@ def start_knowledge_health_scheduler(
         coalesce=True,
     )
 
+    # P1.2 — 60s risk-metrics tick. Emits Prometheus gauges and fires a
+    # drawdown alert when MAX_DRAWDOWN_PCT is breached. The tick is opt-in
+    # via RISK_EXPORTER_ENABLED so paper-only developers do not page
+    # themselves on every run.
+    risk_enabled = _os.environ.get("RISK_EXPORTER_ENABLED", "1").strip().lower()
+    risk_interval = int(_os.environ.get("RISK_EXPORTER_INTERVAL_SECONDS", "60"))
+    if risk_enabled in ("1", "true", "yes", "on"):
+        from risk.metrics_exporter import risk_exporter_job
+
+        scheduler.add_job(
+            risk_exporter_job,
+            trigger="interval",
+            seconds=risk_interval,
+            id="risk_exporter_job",
+            name="Risk metrics exporter",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+
     if paused:
         scheduler.start(paused=True)
     else:
@@ -612,6 +632,8 @@ def start_knowledge_health_scheduler(
     logger.info(
         "knowledge_health_job: scheduled",
         cron_expr=expr, backfill_cron_expr=backfill_expr,
+        risk_exporter_enabled=(risk_enabled in ("1", "true", "yes", "on")),
+        risk_exporter_interval=risk_interval,
     )
     return scheduler
 
