@@ -55,3 +55,6 @@ coverage-integration.xml
 htmlcov/
 .pytest_cache/
 .coverage
+
+# Pre-trade kill-switch flag (#139) — never commit; operator-local state
+.killswitch

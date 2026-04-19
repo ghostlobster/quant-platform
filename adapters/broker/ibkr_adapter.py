@@ -13,14 +13,19 @@ and the import chain is valid.
 """
 from __future__ import annotations
 
+import logging
 import os
 from typing import Optional
+
+from risk.pretrade_guard import GuardLimits, GuardViolation, PreTradeGuard
 
 try:
     import ibapi as _ibapi  # noqa: F401  (import check only)
     _IBAPI_AVAILABLE = True
 except ImportError:
     _IBAPI_AVAILABLE = False
+
+logger = logging.getLogger(__name__)
 
 
 class IBKRAdapter:
@@ -35,6 +40,7 @@ class IBKRAdapter:
         self._host = os.environ.get("IBKR_HOST", "127.0.0.1")
         self._port = int(os.environ.get("IBKR_PORT", "7497"))
         self._client_id = int(os.environ.get("IBKR_CLIENT_ID", "1"))
+        self._guard = PreTradeGuard(GuardLimits.from_env(), self)
 
     def get_account_info(self) -> dict:
         raise NotImplementedError("IBKRAdapter: full implementation pending Phase 2")
@@ -50,6 +56,21 @@ class IBKRAdapter:
         order_type: str = "market",
         limit_price: Optional[float] = None,
     ) -> dict:
+        try:
+            self._guard.check(symbol, qty, side, limit_price)
+        except GuardViolation as violation:
+            logger.warning(
+                "pretrade_guard_reject symbol=%s qty=%s side=%s reason=%s",
+                symbol, qty, side, violation.reason,
+            )
+            return {
+                "symbol": symbol.upper(),
+                "qty": qty,
+                "side": side,
+                "order_type": order_type,
+                "status": "rejected",
+                "reason": violation.reason,
+            }
         raise NotImplementedError("IBKRAdapter: full implementation pending Phase 2")
 
     def cancel_order(self, order_id: str) -> bool:

@@ -574,6 +574,15 @@ def start_knowledge_health_scheduler(
     expr = cron_expr or _os.environ.get("KNOWLEDGE_HEALTH_CRON", "0 * * * *")
     trigger = CronTrigger.from_crontab(expr)
 
+    # Install the kill-switch SIGTERM handler so a TERM'd scheduler also
+    # flags the broker adapters to reject any further orders.
+    try:
+        from risk.pretrade_guard import install_killswitch_handler
+
+        install_killswitch_handler()
+    except (ValueError, OSError) as exc:  # pragma: no cover — signal-only failure paths
+        logger.warning("killswitch_handler_install_failed", error=str(exc))
+
     scheduler = BackgroundScheduler()
     scheduler.add_job(
         knowledge_health_job,

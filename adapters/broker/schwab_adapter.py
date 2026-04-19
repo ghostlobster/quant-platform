@@ -10,14 +10,19 @@ Full implementation is Phase 2 scope.
 """
 from __future__ import annotations
 
+import logging
 import os
 from typing import Optional
+
+from risk.pretrade_guard import GuardLimits, GuardViolation, PreTradeGuard
 
 try:
     import schwab as _schwab  # noqa: F401  (import check only)
     _SCHWAB_AVAILABLE = True
 except ImportError:
     _SCHWAB_AVAILABLE = False
+
+logger = logging.getLogger(__name__)
 
 
 class SchwabAdapter:
@@ -33,6 +38,7 @@ class SchwabAdapter:
         self._secret_key = os.environ.get("SCHWAB_SECRET_KEY", "")
         self._account_id = os.environ.get("SCHWAB_ACCOUNT_ID", "")
         self._token_path = os.environ.get("SCHWAB_TOKEN_PATH", "./schwab_token.json")
+        self._guard = PreTradeGuard(GuardLimits.from_env(), self)
 
     def get_account_info(self) -> dict:
         raise NotImplementedError("SchwabAdapter: full implementation pending Phase 2")
@@ -48,6 +54,21 @@ class SchwabAdapter:
         order_type: str = "market",
         limit_price: Optional[float] = None,
     ) -> dict:
+        try:
+            self._guard.check(symbol, qty, side, limit_price)
+        except GuardViolation as violation:
+            logger.warning(
+                "pretrade_guard_reject symbol=%s qty=%s side=%s reason=%s",
+                symbol, qty, side, violation.reason,
+            )
+            return {
+                "symbol": symbol.upper(),
+                "qty": qty,
+                "side": side,
+                "order_type": order_type,
+                "status": "rejected",
+                "reason": violation.reason,
+            }
         raise NotImplementedError("SchwabAdapter: full implementation pending Phase 2")
 
     def cancel_order(self, order_id: str) -> bool:

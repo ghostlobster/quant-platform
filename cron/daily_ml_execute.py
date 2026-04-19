@@ -42,6 +42,7 @@ import argparse
 import os
 import sys
 
+from risk.pretrade_guard import install_killswitch_handler
 from strategies.ml_execution import execute_ml_signals
 from strategies.ml_signal import _LGBM_AVAILABLE, MLSignal
 from utils.logger import get_logger
@@ -114,6 +115,8 @@ def _check_knowledge_gate() -> int | None:
 def main(argv: list[str] | None = None) -> None:
     parser = _build_arg_parser()
     args = parser.parse_args(argv)
+
+    install_killswitch_handler()
 
     enforce_gate = _resolve_gate_enforcement(args.enforce_knowledge_gate)
 
