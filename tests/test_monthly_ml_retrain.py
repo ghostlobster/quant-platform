@@ -30,7 +30,7 @@ def test_main_calls_train_with_default_tickers(mock_cls):
     mock_cls.return_value = mock_instance
 
     from cron.monthly_ml_retrain import main
-    main()
+    main([])
 
     mock_instance.train.assert_called_once()
     call_args = mock_instance.train.call_args
@@ -53,7 +53,7 @@ def test_main_respects_wf_tickers_env(mock_cls, monkeypatch=None):
         # Reload to pick up fresh env; call main directly with patched env
         with patch.dict(os.environ, {"WF_TICKERS": "SPY,GLD,TLT"}):
             # Call main which reads the env var at runtime
-            mod.main()
+            mod.main([])
         call_args = mock_instance.train.call_args
         tickers = call_args[0][0]
         assert "SPY" in tickers
@@ -72,7 +72,7 @@ def test_main_uses_ml_train_period_env(mock_cls):
 
     with patch.dict(os.environ, {"ML_TRAIN_PERIOD": "1y"}):
         from cron.monthly_ml_retrain import main
-        main()
+        main([])
 
     call_kwargs = mock_instance.train.call_args[1]
     assert call_kwargs.get("period") == "1y"
@@ -82,7 +82,7 @@ def test_main_uses_ml_train_period_env(mock_cls):
 def test_main_exits_when_lgbm_unavailable():
     from cron.monthly_ml_retrain import main
     with pytest.raises(SystemExit) as exc_info:
-        main()
+        main([])
     assert exc_info.value.code == 1
 
 
@@ -95,7 +95,7 @@ def test_main_exits_on_runtime_error(mock_cls):
 
     from cron.monthly_ml_retrain import main
     with pytest.raises(SystemExit) as exc_info:
-        main()
+        main([])
     assert exc_info.value.code == 1
 
 
@@ -108,7 +108,7 @@ def test_main_exits_on_unexpected_exception(mock_cls):
 
     from cron.monthly_ml_retrain import main
     with pytest.raises(SystemExit) as exc_info:
-        main()
+        main([])
     assert exc_info.value.code == 1
 
 
@@ -124,7 +124,7 @@ def test_main_passes_tuned_params_when_available(mock_cls, mock_load):
     mock_cls.return_value = mock_instance
 
     from cron.monthly_ml_retrain import main
-    main()
+    main([])
 
     call_kwargs = mock_instance.train.call_args[1]
     assert call_kwargs.get("lgbm_params") == tuned
@@ -140,7 +140,7 @@ def test_main_passes_none_when_no_tuned_params(mock_cls, mock_load):
     mock_cls.return_value = mock_instance
 
     from cron.monthly_ml_retrain import main
-    main()
+    main([])
 
     call_kwargs = mock_instance.train.call_args[1]
     assert call_kwargs.get("lgbm_params") is None
@@ -155,7 +155,7 @@ def test_main_strips_whitespace_from_tickers(mock_cls):
 
     with patch.dict(os.environ, {"WF_TICKERS": " AAPL , MSFT , TSLA "}):
         from cron.monthly_ml_retrain import main
-        main()
+        main([])
 
     tickers = mock_instance.train.call_args[0][0]
     assert "AAPL" in tickers
