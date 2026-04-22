@@ -32,7 +32,7 @@ plotly==6.6.0
 pluggy==1.6.0
 plyer==2.1.0
 protobuf==7.34.1
-pyarrow==23.0.1
+pyarrow==24.0.0
 pycparser==3.0
 pydeck==0.9.1
 Pygments==2.20.0
