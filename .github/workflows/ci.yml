@@ -70,6 +70,10 @@ jobs:
       # Unit tests — excludes integration AND e2e so the unit feedback
       # loop stays tight. The e2e suite runs in parallel via the `e2e`
       # job below; integration runs on demand once tests are added.
+      #
+      # Coverage uses branch coverage (#200) configured in .coveragerc.
+      # The 76 % floor is now line + branch combined, so it's strictly
+      # more rigorous than the historical line-only floor.
       - name: Run unit tests
         continue-on-error: false
         run: |
