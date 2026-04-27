@@ -22,7 +22,7 @@ import journal.trading_journal as jt
 
 
 @pytest.fixture
-def paper_env(tmp_path, monkeypatch):
+def paper_env(tmp_path, monkeypatch):-> None:
     """Isolate paper_trader + journal to per-test tmp SQLite files."""
     monkeypatch.setattr(db_module, "_DB_PATH", str(tmp_path / "quant.db"))
     monkeypatch.setenv("JOURNAL_DB_PATH", str(tmp_path / "journal.db"))
@@ -43,7 +43,7 @@ def paper_env(tmp_path, monkeypatch):
            "no-op. Fix lands separately; this test flips to PASS when the "
            "guard's _account_snapshot also accepts `total_value`.",
 )
-def test_guard_rejects_oversized_then_accepts_relaxed(paper_env, monkeypatch):
+def test_guard_rejects_oversized_then_accepts_relaxed(paper_env, monkeypatch):-> None:
     """Tightening MAX_POSITION_PCT rejects a $10k order against $100k equity;
     relaxing the env var lets the same order fill."""
     from adapters.broker.paper_adapter import PaperBrokerAdapter
@@ -69,7 +69,7 @@ def test_guard_rejects_oversized_then_accepts_relaxed(paper_env, monkeypatch):
     assert portfolio.iloc[0]["Shares"] == pytest.approx(100.0)
 
 
-def test_blocklist_rejects_then_unset_allows(paper_env, monkeypatch):
+def test_blocklist_rejects_then_unset_allows(paper_env, monkeypatch):-> None:
     from adapters.broker.paper_adapter import PaperBrokerAdapter
 
     monkeypatch.setenv("SYMBOL_BLOCKLIST", "MEME, SCAM")
@@ -84,7 +84,7 @@ def test_blocklist_rejects_then_unset_allows(paper_env, monkeypatch):
     assert ok["status"] == "filled"
 
 
-def test_killswitch_blocks_then_release_resumes(paper_env, monkeypatch, tmp_path):
+def test_killswitch_blocks_then_release_resumes(paper_env, monkeypatch, tmp_path):-> None:
     """Touching the kill-switch file blocks every adapter; removing the file
     resumes trading."""
     killswitch = tmp_path / "killswitch.flag"
