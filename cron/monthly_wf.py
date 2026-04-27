@@ -1,11 +1,17 @@
 """
 Monthly walk-forward backtest runner.
-Run manually: python -m cron.monthly_wf
+Run manually: python -m cron.monthly_wf [--executor auto|ray|mp|serial]
 Schedule via cron: 0 6 1 * * /path/to/venv/bin/python -m cron.monthly_wf
 
 Results saved to: data/wf_history.db (SQLite)
 Table: wf_results (run_date, ticker, consistency_score, total_return, n_windows)
+
+ENV vars
+--------
+    WF_EXECUTOR  auto | ray | mp | serial  (default: auto — Ray when available)
+    WF_TICKERS   comma-separated ticker list (default: SPY,QQQ,AAPL,MSFT,TSLA)
 """
+import argparse
 import os
 import sqlite3
 import sys
@@ -15,13 +21,31 @@ from pathlib import Path
 import pandas as pd
 import yfinance as yf
 
-from backtester.walk_forward import walk_forward
+from backtester.walk_forward import walk_forward, walk_forward_parallel
 from utils.logger import get_logger
 
 logger = get_logger("cron.monthly_wf")
 
 DB_PATH = Path(__file__).parent.parent / "data" / "wf_history.db"
 DEFAULT_TICKERS = "SPY,QQQ,AAPL,MSFT,TSLA"
+
+
+def _build_arg_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="cron.monthly_wf",
+        description="Monthly walk-forward runner. Honours WF_EXECUTOR env var.",
+    )
+    parser.add_argument(
+        "--executor",
+        choices=("auto", "ray", "mp", "serial"),
+        default=None,
+        help=(
+            "Executor for the per-segment backtest. 'auto' (default) prefers "
+            "Ray when importable, else multiprocessing. 'serial' runs "
+            "single-threaded — useful for debugging."
+        ),
+    )
+    return parser
 
 
 def _init_db(conn: sqlite3.Connection) -> None:
@@ -61,7 +85,10 @@ def _upsert_result(
     conn.commit()
 
 
-def run() -> int:
+def run(argv: list[str] | None = None) -> int:
+    args = _build_arg_parser().parse_args(argv)
+    executor = args.executor or os.environ.get("WF_EXECUTOR")
+
     tickers = [
         t.strip().upper()
         for t in os.getenv("WF_TICKERS", DEFAULT_TICKERS).split(",")
@@ -84,8 +111,19 @@ def run() -> int:
                 raise ValueError(f"No data returned for {ticker}")
             df = df.rename(columns=str.lower)
 
-            logger.info("Running walk_forward for %s (%d bars)", ticker, len(df))
-            wf = walk_forward(df, ticker=ticker)
+            logger.info(
+                "Running walk_forward for %s (%d bars, executor=%s)",
+                ticker, len(df), executor or "single",
+            )
+            # Default (no --executor / WF_EXECUTOR) keeps the historical
+            # single-threaded path. Operators opt into parallelism by
+            # passing an explicit executor.
+            if executor in (None, "single", "serial"):
+                wf = walk_forward(df, ticker=ticker)
+            else:
+                wf = walk_forward_parallel(
+                    df, ticker=ticker, executor=executor,
+                )
 
             n_windows = len(wf.windows)
             _upsert_result(

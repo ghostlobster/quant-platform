@@ -93,7 +93,7 @@ class TestDbInit:
         monkeypatch.setenv("WF_TICKERS", "SPY")
 
         from cron import monthly_wf
-        monthly_wf.run()
+        monthly_wf.run([])
 
         assert tmp_db.exists(), "DB file should be created"
 
@@ -107,7 +107,7 @@ class TestDbInit:
         monkeypatch.setenv("WF_TICKERS", "SPY")
 
         from cron import monthly_wf
-        monthly_wf.run()
+        monthly_wf.run([])
 
         conn = sqlite3.connect(tmp_db)
         cols = {row[1] for row in conn.execute("PRAGMA table_info(wf_results)").fetchall()}
@@ -121,7 +121,7 @@ class TestPersistence:
         monkeypatch.setenv("WF_TICKERS", "SPY")
 
         from cron import monthly_wf
-        rc = monthly_wf.run()
+        rc = monthly_wf.run([])
 
         assert rc == 0
 
@@ -140,7 +140,7 @@ class TestPersistence:
         monkeypatch.setenv("WF_TICKERS", "SPY,QQQ")
 
         from cron import monthly_wf
-        monthly_wf.run()
+        monthly_wf.run([])
 
         conn = sqlite3.connect(tmp_db)
         tickers = {r[0] for r in conn.execute("SELECT ticker FROM wf_results").fetchall()}
@@ -156,8 +156,8 @@ class TestUpsertBehavior:
 
         from cron import monthly_wf
 
-        monthly_wf.run()
-        monthly_wf.run()  # second run on same date
+        monthly_wf.run([])
+        monthly_wf.run([])  # second run on same date
 
         conn = sqlite3.connect(tmp_db)
         count = conn.execute("SELECT COUNT(*) FROM wf_results WHERE ticker='SPY'").fetchone()[0]
@@ -183,10 +183,10 @@ class TestUpsertBehavior:
         )
 
         with patch("cron.monthly_wf.walk_forward", return_value=wf_first):
-            monthly_wf.run()
+            monthly_wf.run([])
 
         with patch("cron.monthly_wf.walk_forward", return_value=wf_second):
-            monthly_wf.run()
+            monthly_wf.run([])
 
         conn = sqlite3.connect(tmp_db)
         row = conn.execute(
@@ -204,7 +204,7 @@ class TestFailureHandling:
 
         with patch("cron.monthly_wf.yf.download", side_effect=RuntimeError("network error")):
             from cron import monthly_wf
-            rc = monthly_wf.run()
+            rc = monthly_wf.run([])
 
         assert rc == 1
 
@@ -222,7 +222,7 @@ class TestFailureHandling:
         with patch("cron.monthly_wf.yf.download", side_effect=fake_download), \
              patch("cron.monthly_wf.walk_forward", return_value=wf):
             from cron import monthly_wf
-            rc = monthly_wf.run()
+            rc = monthly_wf.run([])
 
         assert rc == 1
 
