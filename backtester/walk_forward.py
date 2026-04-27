@@ -3,11 +3,18 @@ backtester/walk_forward.py — Walk-forward backtesting with optional parallelis
 
 Rolling train/test windows over the full price series. The standard
 `walk_forward()` is single-threaded. `walk_forward_parallel()` distributes
-segments across CPU cores (multiprocessing) or a Ray cluster when available.
+segments across executors:
+
+* ``auto`` (default — P1.12) — prefer Ray when importable, otherwise
+  ``ProcessPoolExecutor``. Single-process serial when only one segment.
+* ``ray`` — force the Ray path (raises if ``ray`` is not installed).
+* ``mp``  — force ``ProcessPoolExecutor``.
+* ``serial`` — single-threaded (useful for debugging).
 
 ENV vars
 --------
-    RAY_ENABLED   '1' to use Ray cluster for segment parallelism (default: 0)
+    WF_EXECUTOR   auto | ray | mp | serial  (default: auto)
+    RAY_ENABLED   legacy alias — when '1' it forces ``ray`` if WF_EXECUTOR is unset
 """
 from __future__ import annotations
 
@@ -100,6 +107,32 @@ def _run_segment(args: tuple) -> Optional[BacktestResult]:
         return None
 
 
+_VALID_EXECUTORS = ("auto", "ray", "mp", "serial")
+
+
+def _resolve_executor(executor: Optional[str]) -> str:
+    """Pick the concrete executor name based on the request and the environment.
+
+    ``executor`` argument takes precedence over the ``WF_EXECUTOR`` env var,
+    which takes precedence over the legacy ``RAY_ENABLED`` flag.
+    """
+    requested = (executor or os.environ.get("WF_EXECUTOR", "auto")).lower().strip()
+    if requested not in _VALID_EXECUTORS:
+        raise ValueError(
+            f"executor must be one of {_VALID_EXECUTORS}, got {requested!r}",
+        )
+    if requested == "auto":
+        # Honour the legacy env-var if the operator hasn't picked WF_EXECUTOR.
+        if os.environ.get("RAY_ENABLED", "0") == "1":
+            return "ray"
+        try:
+            import ray  # noqa: F401
+            return "ray"
+        except ImportError:
+            return "mp"
+    return requested
+
+
 def walk_forward_parallel(
     df: pd.DataFrame,
     strategy: str = "sma_crossover",
@@ -108,13 +141,13 @@ def walk_forward_parallel(
     test_periods: int = 60,
     step: int = 30,
     n_workers: Optional[int] = None,
+    executor: Optional[str] = None,
 ) -> WalkForwardResult:
-    """
-    Parallelised walk-forward backtest using multiprocessing.
+    """Parallelised walk-forward backtest.
 
-    When RAY_ENABLED=1 and ray is installed, uses a Ray cluster instead of
-    multiprocessing.Pool.  Falls back to single-threaded walk_forward() if
-    parallelism is unavailable.
+    When ``executor`` is unset / ``"auto"`` the function prefers Ray (if
+    importable) and otherwise falls back to ``ProcessPoolExecutor``. Pass
+    ``executor="serial"`` for deterministic single-threaded debugging.
 
     Parameters
     ----------
@@ -124,7 +157,9 @@ def walk_forward_parallel(
     train_periods : bars reserved for training (skipped)
     test_periods  : bars per test segment
     step          : slide step between windows
-    n_workers     : number of parallel workers (default: os.cpu_count())
+    n_workers     : number of parallel workers (default: ``os.cpu_count()``)
+    executor      : ``auto | ray | mp | serial`` — override the env-var
+                    selection.
 
     Returns
     -------
@@ -143,9 +178,10 @@ def walk_forward_parallel(
     if not segments:
         return WalkForwardResult()
 
+    chosen = _resolve_executor(executor)
+
     # Ray path
-    use_ray = os.environ.get("RAY_ENABLED", "0") == "1"
-    if use_ray:
+    if chosen == "ray":
         try:
             import ray  # type: ignore[import]
             if not ray.is_initialized():
@@ -160,13 +196,13 @@ def walk_forward_parallel(
             results = [r for r in raw_results if r is not None]
         except ImportError:
             logger.info("ray not installed; falling back to multiprocessing")
-            use_ray = False
+            chosen = "mp"
         except Exception as exc:
             logger.warning("Ray execution failed (%s); falling back to multiprocessing", exc)
-            use_ray = False
+            chosen = "mp"
 
     # Multiprocessing path
-    if not use_ray:
+    if chosen == "mp":
         workers = n_workers or min(os.cpu_count() or 1, len(segments))
         results: list[BacktestResult] = []
         with ProcessPoolExecutor(max_workers=workers) as pool:
@@ -175,6 +211,14 @@ def walk_forward_parallel(
                 result = future.result()
                 if result is not None:
                     results.append(result)
+
+    # Serial path
+    if chosen == "serial":
+        results = []
+        for seg in segments:
+            r = _run_segment(seg)
+            if r is not None:
+                results.append(r)
 
     if not results:
         return WalkForwardResult()
