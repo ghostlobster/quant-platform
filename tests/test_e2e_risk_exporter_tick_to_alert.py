@@ -104,6 +104,16 @@ def test_drawdown_breach_fires_alert_then_cooldown(monkeypatch, journal_db):
     assert refired is True
     assert len(received) == 2
 
+    # Bus publish (P1.9) — every breach must also land on the risk stream.
+    from bus.event_bus import get_event_bus, reset_event_bus
+    from bus.events import EventType, Stream
+
+    bus_rows = list(get_event_bus().replay(Stream.RISK))
+    assert len(bus_rows) >= 2
+    assert all(evt.event_type == EventType.RISK_BREACH for _, evt in bus_rows)
+    assert bus_rows[0][1].payload["drawdown"] == pytest.approx(-1 / 6)
+    reset_event_bus()
+
 
 def test_no_alert_when_within_threshold(monkeypatch, journal_db):
     """Drawdown above the threshold (e.g. -3%) does not broadcast."""

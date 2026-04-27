@@ -312,6 +312,24 @@ def maybe_alert_drawdown(
         threshold=-threshold,
         equity=snapshot.equity,
     )
+
+    # Best-effort bus publish (#147). Silently no-ops when EVENT_BUS_ENABLED!=1.
+    try:
+        from bus.event_bus import publish as _bus_publish
+        from bus.events import EventType
+
+        _bus_publish(
+            EventType.RISK_BREACH,
+            {
+                "drawdown": snapshot.drawdown,
+                "threshold": -threshold,
+                "equity": snapshot.equity,
+                "daily_pnl": snapshot.daily_pnl,
+            },
+        )
+    except Exception as exc:  # pragma: no cover — bus is best-effort
+        logger.debug("risk_exporter: bus publish failed", error=str(exc))
+
     return True
 
 
