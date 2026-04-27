@@ -1,4 +1,12 @@
 [run]
+# Branch coverage (#200) — line coverage marks
+#   if x: return None
+#   return _compute(x)
+# 100 % covered if any test calls the function with truthy x. Branch
+# coverage flips that: each conditional must be exercised through both
+# arms before the file is "fully covered". Strictly more rigorous;
+# coverage.py supports it natively, no extra deps.
+branch = True
 omit =
     venv/*
     .venv/*
