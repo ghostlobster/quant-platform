@@ -22,7 +22,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 import adapters.market_data.polygon_adapter as polymod
 import cron.polygon_backfill as backfill
-import data.db as db_module
 
 pytestmark = pytest.mark.e2e
 
@@ -65,20 +64,8 @@ def fake_polygon(monkeypatch):
     return payload
 
 
-@pytest.fixture
-def isolated_caches(tmp_path, monkeypatch):
-    monkeypatch.setattr(db_module, "_DB_PATH", str(tmp_path / "quant.db"))
-    monkeypatch.setenv("DUCKDB_PATH", str(tmp_path / "quant_tsdb.duckdb"))
-    # Reset the DuckDB connection singleton between tests.
-    import adapters.tsdb.duckdb_adapter as dad
-
-    dad._connection = None
-    yield tmp_path
-    dad._connection = None
-
-
 def test_backfill_populates_sqlite_then_fetch_ohlcv_hits_cache(
-    fake_polygon, isolated_caches, monkeypatch,
+    fake_polygon, e2e_isolated_caches, monkeypatch,
 ):
     """SQLite path: backfill writes price_cache; fetch_ohlcv reads it
     without touching yfinance."""
@@ -112,7 +99,7 @@ def test_backfill_populates_sqlite_then_fetch_ohlcv_hits_cache(
 
 
 def test_backfill_populates_duckdb_when_active(
-    fake_polygon, isolated_caches, monkeypatch,
+    fake_polygon, e2e_isolated_caches, monkeypatch,
 ):
     """DuckDB path: backfill writes to BOTH caches when TSDB_PROVIDER=duckdb."""
     duckdb = pytest.importorskip("duckdb")  # noqa: F841
@@ -135,7 +122,7 @@ def test_backfill_populates_duckdb_when_active(
 
 
 def test_backfill_intraday_does_not_warm_sqlite_cache(
-    fake_polygon, isolated_caches, monkeypatch,
+    fake_polygon, e2e_isolated_caches, monkeypatch,
 ):
     """Intraday timeframes are fetched but skip the daily-only cache schema."""
     monkeypatch.setenv("POLYGON_API_KEY", "key")

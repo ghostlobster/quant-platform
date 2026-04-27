@@ -52,10 +52,16 @@ class DuckDBAdapter:
     def write(self, table: str, records: list[dict]) -> None:
         if not records:
             return
-        import pandas as pd
-        df = pd.DataFrame(records)  # noqa: F841 — referenced by DuckDB's SELECT * FROM df
+        # Parameterised executemany — works against duckdb >= 1.4 which
+        # tightened type inference and rejects pandas ``object``/``str``
+        # columns going through ``INSERT INTO ... SELECT * FROM df``.
+        cols = list(records[0].keys())
+        placeholders = ", ".join("?" * len(cols))
+        col_list = ", ".join(cols)
+        sql = f"INSERT INTO {table} ({col_list}) VALUES ({placeholders})"
+        rows = [tuple(rec.get(c) for c in cols) for rec in records]
         with _lock:
-            self._conn.execute(f"INSERT INTO {table} SELECT * FROM df")
+            self._conn.executemany(sql, rows)
         logger.debug("DuckDB write: %d rows → %s", len(records), table)
 
     def query(self, sql: str, params: tuple = ()) -> list[dict]:

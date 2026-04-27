@@ -52,6 +52,10 @@ Thumbs.db
 .coverage
 coverage.xml
 coverage-integration.xml
+coverage-e2e.xml
+test-results-unit.xml
+test-results-integration.xml
+test-results-e2e.xml
 htmlcov/
 .pytest_cache/
 .coverage

@@ -17,27 +17,12 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 import broker.paper_trader as pt
-import data.db as db_module
 import journal.trading_journal as jt
 
 pytestmark = pytest.mark.e2e
 
 
-@pytest.fixture
-def paper_env(tmp_path, monkeypatch):
-    """Isolate paper_trader + journal to per-test tmp SQLite files."""
-    monkeypatch.setattr(db_module, "_DB_PATH", str(tmp_path / "quant.db"))
-    monkeypatch.setenv("JOURNAL_DB_PATH", str(tmp_path / "journal.db"))
-    monkeypatch.setattr(pt, "STARTING_CASH", 100_000.0)
-    # Disable the legacy paper-trader circuit breaker so the guard alone
-    # decides accept / reject.
-    monkeypatch.setattr(pt, "MAX_DRAWDOWN_PCT", 0.99)
-    pt.init_paper_tables()
-    jt.init_journal_table()
-    return tmp_path
-
-
-def test_guard_rejects_oversized_then_accepts_relaxed(paper_env, monkeypatch):
+def test_guard_rejects_oversized_then_accepts_relaxed(e2e_paper_env, monkeypatch):
     """Tightening MAX_POSITION_PCT rejects a $10k order against $100k equity;
     relaxing the env var lets the same order fill."""
     from adapters.broker.paper_adapter import PaperBrokerAdapter
@@ -63,7 +48,7 @@ def test_guard_rejects_oversized_then_accepts_relaxed(paper_env, monkeypatch):
     assert portfolio.iloc[0]["Shares"] == pytest.approx(100.0)
 
 
-def test_blocklist_rejects_then_unset_allows(paper_env, monkeypatch):
+def test_blocklist_rejects_then_unset_allows(e2e_paper_env, monkeypatch):
     from adapters.broker.paper_adapter import PaperBrokerAdapter
 
     monkeypatch.setenv("SYMBOL_BLOCKLIST", "MEME, SCAM")
@@ -78,7 +63,7 @@ def test_blocklist_rejects_then_unset_allows(paper_env, monkeypatch):
     assert ok["status"] == "filled"
 
 
-def test_killswitch_blocks_then_release_resumes(paper_env, monkeypatch, tmp_path):
+def test_killswitch_blocks_then_release_resumes(e2e_paper_env, monkeypatch, tmp_path):
     """Touching the kill-switch file blocks every adapter; removing the file
     resumes trading."""
     killswitch = tmp_path / "killswitch.flag"
