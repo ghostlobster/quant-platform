@@ -18,6 +18,10 @@ import broker.paper_trader as pt
 import data.db as db_module
 from providers.broker import OrderIntent
 
+# Every test in this file is part of the e2e regression suite — runs in
+# the dedicated `e2e` CI job, deselected from the fast unit pass.
+pytestmark = pytest.mark.e2e
+
 
 @pytest.fixture
 def paper_env(tmp_path, monkeypatch):

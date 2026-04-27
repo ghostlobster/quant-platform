@@ -18,6 +18,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 import cron.monthly_ml_retrain as retrain
 
+pytestmark = pytest.mark.e2e
+
 
 class _FakeRegistry:
     def __init__(self) -> None:
