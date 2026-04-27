@@ -102,6 +102,24 @@ pytest tests/ -m "not integration and not e2e"
 5. Update `scripts/check_e2e_coverage.py` with any new module the chain
    exercises so the per-module coverage floor catches future drift.
 
+## Off-cycle: weekly mutation testing (#204)
+
+A separate workflow `.github/workflows/mutation.yml` runs `mutmut`
+against the math-heavy modules — `risk/`, `analysis/`,
+`strategies/indicators.py` — every Monday at 06:00 UTC. Mutation
+testing flips operators and constants in source and re-runs the
+suite; tests that still pass mean the original line was exercised
+but the assertions don't actually catch the bug.
+
+It is **not** a PR gate (each run is ≥ 30 min and the survival rate
+is advisory, not pass/fail). The HTML report is uploaded as an
+artifact; review it weekly to add assertions where survival is high.
+Manual runs are available from the Actions tab via
+`workflow_dispatch`.
+
+Dev-only deps live in `requirements-dev.txt`; runtime deps are
+unaffected.
+
 ## Best-practice config
 
 | Setting | Value | Why |

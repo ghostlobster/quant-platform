@@ -1,0 +1,7 @@
+# Dev-only dependencies. Not installed in production / runtime images.
+# Runtime deps live in requirements.txt.
+#
+# Mutation testing (#204) — runs weekly via .github/workflows/mutation.yml.
+# Pinned to a recent stable release; kept off the runtime requirements
+# because mutmut pulls test infrastructure that's irrelevant in prod.
+mutmut>=2.5.0
