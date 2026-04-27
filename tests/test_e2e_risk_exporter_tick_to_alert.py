@@ -25,21 +25,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 import journal.trading_journal as jt
 from risk import metrics_exporter as me
 
+# E2EFakeBroker comes from tests/conftest.py — same shape as the
+# previous local FakeBroker but reused by every e2e file.
+from tests.conftest import E2EFakeBroker as FakeBroker  # noqa: E402
+
 pytestmark = pytest.mark.e2e
-
-
-class FakeBroker:
-    """Minimal BrokerProvider stand-in; only the methods the exporter calls."""
-
-    def __init__(self, equity: float, positions: list[dict] | None = None):
-        self.equity = equity
-        self._positions = positions or []
-
-    def get_account_info(self) -> dict:
-        return {"equity": self.equity}
-
-    def get_positions(self) -> list[dict]:
-        return list(self._positions)
 
 
 @pytest.fixture(autouse=True)
@@ -49,14 +39,7 @@ def _reset_alert_state():
     me.reset_alert_state()
 
 
-@pytest.fixture
-def journal_db(tmp_path, monkeypatch):
-    monkeypatch.setenv("JOURNAL_DB_PATH", str(tmp_path / "journal.db"))
-    jt.init_journal_table()
-    return tmp_path
-
-
-def test_drawdown_breach_fires_alert_then_cooldown(monkeypatch, journal_db):
+def test_drawdown_breach_fires_alert_then_cooldown(monkeypatch, e2e_journal_db):
     """Tick 1 breaches the threshold and broadcasts; tick 2 (within
     cooldown) is silent; tick 3 after cooldown re-broadcasts."""
     # Seed journal with -$12k realised PnL today.
@@ -117,7 +100,7 @@ def test_drawdown_breach_fires_alert_then_cooldown(monkeypatch, journal_db):
     reset_event_bus()
 
 
-def test_no_alert_when_within_threshold(monkeypatch, journal_db):
+def test_no_alert_when_within_threshold(monkeypatch, e2e_journal_db):
     """Drawdown above the threshold (e.g. -3%) does not broadcast."""
     monkeypatch.setattr(
         me, "_portfolio_value_series",
@@ -140,7 +123,7 @@ def test_no_alert_when_within_threshold(monkeypatch, journal_db):
     assert sent == []
 
 
-def test_risk_exporter_job_returns_payload(monkeypatch, journal_db):
+def test_risk_exporter_job_returns_payload(monkeypatch, e2e_journal_db):
     """The scheduler-callable entry-point returns a dict with every gauge
     field plus the `alerted` flag."""
     monkeypatch.setattr(me, "_portfolio_value_series", lambda: [])

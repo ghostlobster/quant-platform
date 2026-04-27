@@ -15,7 +15,6 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 import broker.paper_trader as pt
-import data.db as db_module
 from providers.broker import OrderIntent
 
 # Every test in this file is part of the e2e regression suite — runs in
@@ -23,16 +22,7 @@ from providers.broker import OrderIntent
 pytestmark = pytest.mark.e2e
 
 
-@pytest.fixture
-def paper_env(tmp_path, monkeypatch):
-    monkeypatch.setattr(db_module, "_DB_PATH", str(tmp_path / "quant.db"))
-    monkeypatch.setattr(pt, "STARTING_CASH", 100_000.0)
-    monkeypatch.setattr(pt, "MAX_DRAWDOWN_PCT", 0.99)
-    pt.init_paper_tables()
-    return tmp_path
-
-
-def test_bracket_take_profit_lifecycle(paper_env):
+def test_bracket_take_profit_lifecycle(e2e_paper_env):
     """A long bracket with TP=110 fills the parent at 100, ignores
     interim ticks, and closes the child when price crosses TP."""
     from adapters.broker.paper_adapter import PaperBrokerAdapter
@@ -69,7 +59,7 @@ def test_bracket_take_profit_lifecycle(paper_env):
     assert pt.get_pending_brackets() == []
 
 
-def test_bracket_stop_loss_lifecycle(paper_env):
+def test_bracket_stop_loss_lifecycle(e2e_paper_env):
     """The stop-loss leg fires when the price crosses below the SL level."""
     from adapters.broker.paper_adapter import PaperBrokerAdapter
 
@@ -86,7 +76,7 @@ def test_bracket_stop_loss_lifecycle(paper_env):
     assert pt.get_portfolio().empty
 
 
-def test_bracket_trailing_stop_tracks_peak(paper_env):
+def test_bracket_trailing_stop_tracks_peak(e2e_paper_env):
     """Trailing stop slides up with the price and fires on a 5% pullback
     from the running peak."""
     from adapters.broker.paper_adapter import PaperBrokerAdapter
@@ -109,7 +99,7 @@ def test_bracket_trailing_stop_tracks_peak(paper_env):
     assert pt.get_portfolio().empty
 
 
-def test_bracket_cancel_prevents_future_fill(paper_env):
+def test_bracket_cancel_prevents_future_fill(e2e_paper_env):
     """Cancelling a bracket before it triggers leaves the position open
     and ignores subsequent price ticks."""
     from adapters.broker.paper_adapter import PaperBrokerAdapter

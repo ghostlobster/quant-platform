@@ -1,14 +1,17 @@
 # CI Pipeline Layout
 
-The platform's GitHub Actions pipeline is split into four jobs that run
-in parallel on every push to `main` and every PR targeting `main`:
+The platform's GitHub Actions pipeline runs **five** jobs on every push
+to `main` and every PR targeting `main`. The first four run in parallel;
+the fifth is the umbrella merge gate that depends on all of them and is
+the **only** required check on `main`.
 
 | Job | Owns | Coverage gate |
 |---|---|---|
 | `lint` | `ruff check .` | n/a |
 | `security` | `bandit -ll` (HIGH-only) + `pip-audit` | n/a |
-| `Test (Python 3.11)` | unit tests (`-m "not integration and not e2e"`) + integration scaffold | 76% — **gates merges** |
-| `E2E (Python 3.11)` | end-to-end regression suite (`-m e2e`) | reported, **not gated** |
+| `Test (Python 3.11)` | unit tests (`-m "not integration and not e2e"`) + integration scaffold | 76% global line floor — **gates merges** |
+| `E2E (Python 3.11)` | end-to-end regression suite (`-m e2e`) | per-module floor via `scripts/check_e2e_coverage.py` (each cross-module file ≥ 40 %, with hand-tightened bumps) — **gates merges** |
+| `Merge gate` | depends on all four above; verifies `needs.*.result` for every parent | n/a — pure dependency aggregator |
 
 Splitting unit and e2e into separate jobs follows three best practices:
 
@@ -41,21 +44,26 @@ pytestmark = pytest.mark.e2e
 
 so every test in the file inherits it without per-function decoration.
 
-## Required checks (branch-protection update needed)
+## Required checks (single umbrella job)
 
-After this PR merges, the branch-protection rule on `main` should be
-updated to require **both** of the following checks before a PR can
-merge:
+Branch protection on `main` requires exactly **one** check:
 
-- `Test (Python 3.11)`
-- `E2E (Python 3.11)`
+```
+Merge gate
+```
 
-Without that update, a PR that breaks the e2e chain could still merge
-on a green unit job. The CI itself emits both — branch protection just
-has to enforce both.
+The `merge-gate` job in `.github/workflows/ci.yml` declares
+`needs: [lint, security, test, e2e]` with `if: always()` and explicitly
+fails when any upstream job's `result` is not `success` or `skipped`.
+Adding a future job (e.g. `integration`) to the pipeline only requires
+extending the `needs:` array — branch protection never has to change.
 
-GitHub UI path: **Settings → Branches → main → Edit → Require status
-checks to pass before merging → add `E2E (Python 3.11)`.**
+GitHub UI path on first setup: **Settings → Branches → main → Edit →
+Require status checks to pass before merging → add `Merge gate`.**
+
+The four upstream jobs still publish independent status checks for
+visibility (you can see which one failed at a glance on the PR), but
+the merge button only listens to `Merge gate`.
 
 ## Local mirror
 
@@ -84,7 +92,21 @@ pytest tests/ -m "not integration and not e2e"
 
 1. Create `tests/test_e2e_<chain>.py`.
 2. Add `pytestmark = pytest.mark.e2e` immediately after the imports.
-3. Reuse fixtures that point `data.db._DB_PATH` / `JOURNAL_DB_PATH` /
-   `DUCKDB_PATH` at `tmp_path` so the test never touches operator state.
+3. **Reuse the shared fixtures** in `tests/conftest.py`:
+   - `e2e_paper_env` — paper-trader + journal isolated to per-test SQLite.
+   - `e2e_journal_db` — journal-only isolation when paper_trader is not in scope.
+   - `e2e_isolated_caches` — per-test SQLite + DuckDB cache files; resets the DuckDB connection singleton.
+   - `E2EFakeBroker` — minimal `BrokerProvider` stand-in returning both `equity` and `total_value` so it works against the live and the paper paths.
 4. Mock at the network boundary only (HTTP adapter, MLflow registry,
    alert channels). Real SQLite, real journal, real paper trader.
+5. Update `scripts/check_e2e_coverage.py` with any new module the chain
+   exercises so the per-module coverage floor catches future drift.
+
+## Best-practice config
+
+| Setting | Value | Why |
+|---|---|---|
+| `pytest.ini` `addopts` | `--strict-markers --strict-config --tb=short` | Typos in marker names fail loud; short tracebacks keep PR comments readable. |
+| `pytest.ini` `timeout` | `60 s` per test (`thread` method) | Catches a hung test before it eats the 15-min job budget. Provided by `pytest-timeout`. |
+| `requirements.txt` | `pytest-timeout`, `pytest-xdist` | Available for parallel runs once the suite outgrows a single worker; not enabled by default because xdist startup overhead dominates at the current 16-test size. |
+| `tests/conftest.py` env | `OMP_NUM_THREADS=1` etc. | Prevents OpenBLAS background threads from triggering `std::terminate()` during interpreter shutdown on CI. |
