@@ -22,12 +22,22 @@ Source: `.github/workflows/ci.yml:22-23`. Fails CI on any violation. On failure,
 ### 2. Unit tests + coverage (76% combined line+branch gate)
 
 ```
-pytest tests/ -m "not integration" --cov=. --cov-fail-under=76 --cov-report=term-missing
+pytest tests/ -m "not integration" --cov=. --cov-fail-under=76 --cov-report=term-missing --junitxml=/tmp/pre-push-junit.xml
 ```
 
 Source: `.github/workflows/ci.yml:73-79`. On failure, report which tests failed (first 5) and, if the failure is coverage-only, print the files with the lowest coverage from the term-missing report.
 
 **Branch coverage is on** (`.coveragerc:branch = True`, #200) so the term-missing report shows partial branches with `1->2` notation — those are conditionals where one arm is unexercised. The `Missing` column lists them; pick a few with the lowest impact before pushing.
+
+The `--junitxml` flag is needed by stage 2b below.
+
+### 2b. Silent-skip guard (#199)
+
+```
+python scripts/check_no_silent_skips.py /tmp/pre-push-junit.xml requirements.txt
+```
+
+Source: `.github/workflows/ci.yml`. Fails if any test was skipped because a package pinned in `requirements.txt` failed to import — the regression mode where a removed pin or a broken wheel silently lowers coverage with no failing test. On failure, the script names the offending package and the affected test; the fix is almost always `pip install -r requirements.txt` (or restoring the dropped pin in source).
 
 ### 3. Bandit (HIGH severity only)
 
@@ -55,6 +65,7 @@ Stage                    | Result
 -------------------------+--------
 1. ruff                  | PASS
 2. pytest (cov >= 76%)   | PASS
+2b. silent-skip guard    | PASS
 3. bandit HIGH           | PASS
 4. pip-audit             | PASS
 ```
