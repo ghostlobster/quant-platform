@@ -113,6 +113,109 @@ class BrokerProvider(Protocol):
         ...
 
 
+_LIVE_PROVIDERS = ("alpaca", "ibkr", "schwab")
+
+
+class LivePromotionRefused(RuntimeError):
+    """Raised by ``get_broker`` when the paper→live promotion guard refuses.
+
+    The exception message names the failing precondition so operators can
+    fix the missing env var or extend the paper track record before
+    flipping ``BROKER_PROVIDER`` to a real venue.
+    """
+
+
+def _live_promotion_check(name: str) -> None:
+    """Refuse to instantiate a live broker without explicit confirmation
+    AND a minimum paper track record.
+
+    Two preconditions must both hold:
+
+    * ``LIVE_TRADING_CONFIRMED=true`` — explicit operator opt-in. Set
+      after reviewing the paper track record + risk limits.
+    * Journal shows ≥ ``LIVE_PROMOTION_MIN_DAYS`` (default 30) of distinct
+      paper-trading days with realised PnL Sharpe ≥
+      ``LIVE_PROMOTION_MIN_SHARPE`` (default 0.5).
+
+    The Sharpe gate is a coarse "did the paper run produce something?"
+    check, not a guarantee of profitability. Operators are still
+    responsible for the strategy review.
+
+    Bypassed entirely when ``LIVE_PROMOTION_BYPASS=1`` — for emergency
+    re-enablement after a kill-switch event. Use sparingly; the bypass
+    is logged at error level so audit trails surface it.
+    """
+    if name not in _LIVE_PROVIDERS:
+        return
+    if os.environ.get("LIVE_PROMOTION_BYPASS", "").strip().lower() in ("1", "true", "yes"):
+        import structlog
+        log = structlog.get_logger(__name__)
+        log.error(
+            "live_promotion: bypass active — skipping confirmation + track-record gate",
+            provider=name,
+        )
+        return
+
+    confirmed = os.environ.get("LIVE_TRADING_CONFIRMED", "").strip().lower() in (
+        "1", "true", "yes",
+    )
+    if not confirmed:
+        raise LivePromotionRefused(
+            f"refusing to instantiate live broker {name!r}: "
+            "LIVE_TRADING_CONFIRMED is not set. Set it to 'true' only "
+            "after reviewing the paper track record + risk limits.",
+        )
+
+    min_days = int(os.environ.get("LIVE_PROMOTION_MIN_DAYS", "30"))
+    min_sharpe = float(os.environ.get("LIVE_PROMOTION_MIN_SHARPE", "0.5"))
+    days, sharpe = _paper_track_record()
+    if days < min_days:
+        raise LivePromotionRefused(
+            f"refusing to instantiate live broker {name!r}: paper journal "
+            f"only has {days} distinct trading days, need ≥ {min_days}. "
+            "Continue paper trading or override with LIVE_PROMOTION_MIN_DAYS.",
+        )
+    if sharpe < min_sharpe:
+        raise LivePromotionRefused(
+            f"refusing to instantiate live broker {name!r}: paper Sharpe "
+            f"{sharpe:.2f} < required {min_sharpe:.2f}. Iterate on the "
+            "strategy or relax LIVE_PROMOTION_MIN_SHARPE if intentional.",
+        )
+
+
+def _paper_track_record() -> tuple[int, float]:
+    """Return ``(distinct_paper_days, daily_pnl_sharpe)`` from the journal.
+
+    Sharpe = mean(daily PnL %) / std(daily PnL %) over the realised exits
+    in ``journal_trades.db``. Returns ``(0, 0.0)`` if the journal is
+    empty / unreadable so a fresh install never accidentally passes.
+    """
+    try:
+        from journal.trading_journal import get_journal
+    except Exception:
+        return 0, 0.0
+    try:
+        df = get_journal()
+    except Exception:
+        return 0, 0.0
+    if df is None or df.empty or "pnl" not in df.columns:
+        return 0, 0.0
+    closed = df.dropna(subset=["pnl", "exit_time"])
+    if closed.empty:
+        return 0, 0.0
+
+    import pandas as pd  # local import — keeps the import cost off cold paths
+
+    days = pd.to_datetime(closed["exit_time"]).dt.date
+    pnl_per_day = closed.groupby(days)["pnl"].sum()
+    if len(pnl_per_day) == 0:
+        return 0, 0.0
+    if len(pnl_per_day) == 1 or pnl_per_day.std() == 0:
+        return int(len(pnl_per_day)), 0.0
+    sharpe = float(pnl_per_day.mean() / pnl_per_day.std())
+    return int(len(pnl_per_day)), sharpe
+
+
 def get_broker(provider: Optional[str] = None) -> BrokerProvider:
     """
     Return a configured BrokerProvider adapter.
@@ -127,8 +230,13 @@ def get_broker(provider: Optional[str] = None) -> BrokerProvider:
     ------
     ValueError
         If the provider name is not recognised.
+    LivePromotionRefused
+        If the resolved provider is a live venue (alpaca / ibkr / schwab)
+        and the operator has not satisfied the P1.11 promotion gate
+        (``LIVE_TRADING_CONFIRMED`` + paper track record).
     """
     name = (provider or os.environ.get("BROKER_PROVIDER", "paper")).lower().strip()
+    _live_promotion_check(name)
     if name == "alpaca":
         from adapters.broker.alpaca_adapter import AlpacaBrokerAdapter
         return AlpacaBrokerAdapter()
@@ -145,3 +253,13 @@ def get_broker(provider: Optional[str] = None) -> BrokerProvider:
         f"Unknown broker provider: {name!r}. "
         "Valid options: alpaca, ibkr, schwab, paper"
     )
+
+
+def is_live_mode(provider: Optional[str] = None) -> bool:
+    """Return ``True`` when the configured broker is a live venue.
+
+    Used by the Streamlit sidebar banner to render the live/paper indicator
+    in the right colour.
+    """
+    name = (provider or os.environ.get("BROKER_PROVIDER", "paper")).lower().strip()
+    return name in _LIVE_PROVIDERS

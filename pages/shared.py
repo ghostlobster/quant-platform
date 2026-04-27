@@ -62,6 +62,21 @@ def render_sidebar() -> dict:
     # ── Sidebar ───────────────────────────────────────────────────────────────
     st.sidebar.title("📈 Quant Platform")
     st.sidebar.markdown("*Personal Trading Dashboard*")
+
+    # P1.11 — paper / live mode banner. Live mode goes through the promotion
+    # gate; the banner is the visual confirmation operators get before they
+    # see real money on the line.
+    try:
+        from providers.broker import is_live_mode
+
+        if is_live_mode():
+            st.sidebar.error("🔴 LIVE TRADING — real money at risk", icon="🚨")
+        else:
+            st.sidebar.success("🟢 Paper mode — no real orders sent")
+    except Exception:
+        # Never let the banner break the sidebar; the gate enforces safety.
+        pass
+
     st.sidebar.divider()
 
     # ── Section: Chart Controls ───────────────────────────────────────────────
