@@ -190,7 +190,16 @@ class PreTradeGuard:
             logger.warning("pretrade_guard: account snapshot failed", error=str(exc))
             return 0.0, []
 
-        equity_raw = account.get("equity") or account.get("portfolio_value") or 0.0
+        # Equity key varies by adapter — Alpaca uses ``equity``, the paper
+        # broker exposes ``total_value``, and a few legacy paths still
+        # return ``portfolio_value``. Try all three so the guard's
+        # dollar-sizing dimensions actually fire on every backend.
+        equity_raw = (
+            account.get("equity")
+            or account.get("portfolio_value")
+            or account.get("total_value")
+            or 0.0
+        )
         try:
             equity = float(equity_raw)
         except (TypeError, ValueError):

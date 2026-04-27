@@ -35,14 +35,6 @@ def paper_env(tmp_path, monkeypatch):
     return tmp_path
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="https://github.com/ghostlobster/quant-platform/issues/183 — "
-           "PreTradeGuard reads `equity`/`portfolio_value` but the paper "
-           "broker returns `total_value`, so dollar-sizing limits silently "
-           "no-op. Fix lands separately; this test flips to PASS when the "
-           "guard's _account_snapshot also accepts `total_value`.",
-)
 def test_guard_rejects_oversized_then_accepts_relaxed(paper_env, monkeypatch):
     """Tightening MAX_POSITION_PCT rejects a $10k order against $100k equity;
     relaxing the env var lets the same order fill."""
