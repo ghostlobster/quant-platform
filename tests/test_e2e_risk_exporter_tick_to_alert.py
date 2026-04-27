@@ -25,6 +25,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 import journal.trading_journal as jt
 from risk import metrics_exporter as me
 
+pytestmark = pytest.mark.e2e
+
 
 class FakeBroker:
     """Minimal BrokerProvider stand-in; only the methods the exporter calls."""

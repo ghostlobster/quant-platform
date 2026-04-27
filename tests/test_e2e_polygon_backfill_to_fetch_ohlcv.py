@@ -24,6 +24,8 @@ import adapters.market_data.polygon_adapter as polymod
 import cron.polygon_backfill as backfill
 import data.db as db_module
 
+pytestmark = pytest.mark.e2e
+
 
 def _polygon_payload(rows: int) -> dict:
     base_t = 1_700_000_000_000  # ms

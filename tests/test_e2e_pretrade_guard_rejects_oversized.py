@@ -20,6 +20,8 @@ import broker.paper_trader as pt
 import data.db as db_module
 import journal.trading_journal as jt
 
+pytestmark = pytest.mark.e2e
+
 
 @pytest.fixture
 def paper_env(tmp_path, monkeypatch):
