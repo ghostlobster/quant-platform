@@ -58,3 +58,6 @@ htmlcov/
 
 # Pre-trade kill-switch flag (#139) — never commit; operator-local state
 .killswitch
+
+# Audit log records (#148) — operator-local; rotated via audit.logger.rotate
+audit/log/
