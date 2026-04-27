@@ -1,52 +1,66 @@
 """
-adapters/broker/ibkr_adapter.py — BrokerProvider stub for Interactive Brokers.
+adapters/broker/ibkr_adapter.py — BrokerProvider for Interactive Brokers.
 
-Requires:  pip install ibapi  (IBKR TWS API client)
-ENV vars:  IBKR_HOST (default: 127.0.0.1)
-           IBKR_PORT (default: 7497)
-           IBKR_CLIENT_ID (default: 1)
+Backed by :mod:`broker.ibkr_bridge` (ib_insync). P1.8 (#146) extended the
+bridge with a multi-asset contract factory; this adapter routes each
+order through :func:`data.symbols.resolve` so every ticker carries the
+right ``asset_class`` / ``exchange`` / ``currency`` / ``expiry`` /
+``multiplier`` when it reaches the bridge.
 
-This is a structural stub.  The ibapi library requires an event-loop-based
-EClient/EWrapper pattern; a full async implementation is outside Phase 1 scope.
-The stub raises NotImplementedError for all trading operations so that CI passes
-and the import chain is valid.
+Pre-trade guard (#139) wraps every order — paper and live alike. The
+adapter is a no-op when ``ib_insync`` is missing: ``get_*`` methods
+return empty values, ``place_*`` returns ``{"status": "failed"}``.
+
+ENV vars (forwarded to broker.ibkr_bridge)
+------------------------------------------
+    IBKR_HOST       TWS/Gateway host (default 127.0.0.1)
+    IBKR_PORT       override port (defaults derived from IBKR_PAPER)
+    IBKR_CLIENT_ID  client ID (default 1)
+    IBKR_PAPER      true → 7497 (paper), false → 7496 (live)
 """
 from __future__ import annotations
 
 import logging
-import os
 from typing import Optional
 
+import broker.ibkr_bridge as _bridge
+from data.symbols import AssetClass, SymbolMeta, resolve
 from risk.pretrade_guard import GuardLimits, GuardViolation, PreTradeGuard
-
-try:
-    import ibapi as _ibapi  # noqa: F401  (import check only)
-    _IBAPI_AVAILABLE = True
-except ImportError:
-    _IBAPI_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
 
 class IBKRAdapter:
-    """BrokerProvider stub for Interactive Brokers TWS/Gateway."""
+    """BrokerProvider backed by broker.ibkr_bridge (ib_insync)."""
 
     def __init__(self) -> None:
-        if not _IBAPI_AVAILABLE:
+        if not _bridge._IB_AVAILABLE:
             raise ImportError(
-                "ibapi package is required for IBKRAdapter. "
-                "Install it with: pip install ibapi"
+                "ib_insync package is required for IBKRAdapter. "
+                "Install it with: pip install ib_insync",
             )
-        self._host = os.environ.get("IBKR_HOST", "127.0.0.1")
-        self._port = int(os.environ.get("IBKR_PORT", "7497"))
-        self._client_id = int(os.environ.get("IBKR_CLIENT_ID", "1"))
         self._guard = PreTradeGuard(GuardLimits.from_env(), self)
 
+    # ── account state ────────────────────────────────────────────────────────
+
     def get_account_info(self) -> dict:
-        raise NotImplementedError("IBKRAdapter: full implementation pending Phase 2")
+        return _bridge.get_account_info() or {}
 
     def get_positions(self) -> list[dict]:
-        raise NotImplementedError("IBKRAdapter: full implementation pending Phase 2")
+        raw = _bridge.get_positions() or []
+        out: list[dict] = []
+        for pos in raw:
+            out.append(
+                {
+                    "symbol": pos.get("ticker", ""),
+                    "qty": float(pos.get("qty", 0)),
+                    "avg_entry_price": float(pos.get("avg_cost", 0)),
+                    "market_value": float(pos.get("market_value", 0)),
+                }
+            )
+        return out
+
+    # ── orders ──────────────────────────────────────────────────────────────
 
     def place_order(
         self,
@@ -64,14 +78,13 @@ class IBKRAdapter:
                 symbol, qty, side, violation.reason,
             )
             return {
-                "symbol": symbol.upper(),
-                "qty": qty,
-                "side": side,
+                "symbol": symbol.upper(), "qty": qty, "side": side,
                 "order_type": order_type,
-                "status": "rejected",
-                "reason": violation.reason,
+                "status": "rejected", "reason": violation.reason,
             }
-        raise NotImplementedError("IBKRAdapter: full implementation pending Phase 2")
+
+        meta = resolve(symbol, fallback_class=AssetClass.STOCK)
+        return self._dispatch(meta, qty, side, order_type, limit_price)
 
     def place_bracket(self, intent) -> dict:
         try:
@@ -84,16 +97,64 @@ class IBKRAdapter:
                 intent.symbol, intent.qty, intent.side, violation.reason,
             )
             return {
-                "symbol": intent.symbol.upper(),
-                "qty": intent.qty,
+                "symbol": intent.symbol.upper(), "qty": intent.qty,
                 "side": intent.side,
-                "status": "rejected",
-                "reason": violation.reason,
+                "status": "rejected", "reason": violation.reason,
             }
-        raise NotImplementedError("IBKRAdapter: full implementation pending Phase 2")
+        raise NotImplementedError(
+            "IBKRAdapter.place_bracket: bracket support is Phase 2 — "
+            "use place_order plus a child stop/limit for now",
+        )
 
     def cancel_order(self, order_id: str) -> bool:
-        raise NotImplementedError("IBKRAdapter: full implementation pending Phase 2")
+        return _bridge.cancel_order(order_id)
 
     def get_orders(self, status: str = "open") -> list[dict]:
-        raise NotImplementedError("IBKRAdapter: full implementation pending Phase 2")
+        # ib_insync's openTrades() is the closest match; no canonical wrapper
+        # exists in broker/ibkr_bridge yet, so the adapter returns an empty
+        # list rather than guess.
+        return []
+
+    # ── internal ────────────────────────────────────────────────────────────
+
+    def _dispatch(
+        self,
+        meta: SymbolMeta,
+        qty: float,
+        side: str,
+        order_type: str,
+        limit_price: Optional[float],
+    ) -> dict:
+        bridge_order_type = "LMT" if order_type.lower() == "limit" else "MKT"
+        bridge_side = "BUY" if side.lower() == "buy" else "SELL"
+        result = _bridge.place_order(
+            meta.ticker,
+            qty=qty,
+            side=bridge_side,
+            order_type=bridge_order_type,
+            limit_price=limit_price,
+            asset_class=meta.asset_class,
+            exchange=meta.exchange,
+            currency=meta.currency,
+            expiry=meta.expiry,
+            multiplier=meta.multiplier,
+        )
+        if not result:
+            return {
+                "status": "failed",
+                "symbol": meta.ticker,
+                "asset_class": meta.asset_class,
+                "qty": qty,
+                "side": side,
+            }
+        return {
+            "order_id": result.get("order_id", ""),
+            "symbol": meta.ticker,
+            "asset_class": meta.asset_class,
+            "exchange": meta.exchange,
+            "currency": meta.currency,
+            "qty": qty,
+            "side": side,
+            "order_type": order_type,
+            "status": result.get("status", "unknown"),
+        }

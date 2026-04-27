@@ -95,18 +95,85 @@ def get_positions() -> list[dict]:
         return []
 
 
+def make_contract(
+    ticker: str,
+    asset_class: str = "stock",
+    exchange: str | None = None,
+    currency: str = "USD",
+    *,
+    expiry: str | None = None,
+    multiplier: int | None = None,
+):
+    """Build an ``ib_insync`` contract for the requested asset class.
+
+    Parameters
+    ----------
+    ticker      : underlying symbol; for forex use the 3-letter base code
+                  (e.g. ``"EUR"`` for EUR/USD).
+    asset_class : ``stock`` | ``etf`` | ``forex`` | ``future`` | ``option``.
+    exchange    : routing hint — defaults to ``SMART`` (stock/etf),
+                  ``IDEALPRO`` (forex), ``GLOBEX`` (future).
+    currency    : ISO-4217 quote currency.
+    expiry      : ``YYYYMM`` for futures (ib_insync's
+                  ``lastTradeDateOrContractMonth`` convention).
+    multiplier  : contract multiplier — required for futures.
+
+    Returns the constructed ``ib_insync`` contract object. Raises
+    ``RuntimeError`` if ``ib_insync`` is not installed.
+    """
+    if not _IB_AVAILABLE:
+        raise RuntimeError(
+            "ib_insync package is required to build IBKR contracts; "
+            "install it with: pip install ib_insync",
+        )
+    asset_class = asset_class.lower().strip()
+    ticker = ticker.upper().strip()
+    if asset_class in ("stock", "etf"):
+        return _ib_insync.Stock(ticker, exchange or "SMART", currency)
+    if asset_class == "forex":
+        # ib_insync's Forex constructor accepts EURUSD or EUR/USD.
+        if len(ticker) == 6:
+            base, quote = ticker[:3], ticker[3:]
+        elif "/" in ticker and len(ticker) == 7:
+            base, quote = ticker.split("/")
+        else:
+            base, quote = ticker, currency
+        pair = f"{base}{quote}"
+        return _ib_insync.Forex(pair)
+    if asset_class == "future":
+        if not expiry:
+            raise ValueError("future contracts require an expiry (YYYYMM)")
+        return _ib_insync.Future(
+            ticker, expiry, exchange or "GLOBEX", currency=currency,
+            multiplier=str(multiplier) if multiplier else "",
+        )
+    raise ValueError(f"unsupported asset_class {asset_class!r}")
+
+
 def place_order(
     ticker: str,
     qty: float,
     side: str,
     order_type: str = "MKT",
     limit_price: float = None,
+    *,
+    asset_class: str = "stock",
+    exchange: str | None = None,
+    currency: str = "USD",
+    expiry: str | None = None,
+    multiplier: int | None = None,
 ) -> dict:
     """
     Place an order.
+
     side: 'BUY' or 'SELL'
     order_type: 'MKT' or 'LMT'
-    Returns {'order_id': str, 'status': str} on success, empty dict on failure.
+    asset_class: stock | etf | forex | future (P1.8). Defaults to stock for
+                 backwards compatibility — every existing caller that passes
+                 a US ticker continues to work unchanged.
+
+    Returns ``{"order_id": str, "status": str}`` on success, ``{}`` on
+    failure (network error, unconfigured, or contract build failure).
     """
     if qty <= 0:
         raise ValueError(f"qty must be positive, got {qty}")
@@ -120,7 +187,10 @@ def place_order(
     try:
         ib = _connect()
         try:
-            contract = _ib_insync.Stock(ticker.upper(), "SMART", "USD")
+            contract = make_contract(
+                ticker, asset_class=asset_class, exchange=exchange,
+                currency=currency, expiry=expiry, multiplier=multiplier,
+            )
             ib.qualifyContracts(contract)
             if order_type.upper() == "LMT" and limit_price is not None:
                 order = _ib_insync.LimitOrder(side, qty, limit_price)
