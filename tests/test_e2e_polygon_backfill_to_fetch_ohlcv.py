@@ -109,13 +109,6 @@ def test_backfill_populates_sqlite_then_fetch_ohlcv_hits_cache(
     assert df["Close"].iloc[-1] == pytest.approx(100.5 + 29)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="https://github.com/ghostlobster/quant-platform/issues/184 — "
-           "polygon_backfill writes only the SQLite cache. DuckDB is warmed "
-           "lazily by the next fetch_ohlcv call. Fix lands separately; this "
-           "test flips to PASS when backfill double-writes both caches.",
-)
 def test_backfill_populates_duckdb_when_active(
     fake_polygon, isolated_caches, monkeypatch,
 ):
