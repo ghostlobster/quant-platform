@@ -152,6 +152,7 @@ def backfill(
         return {}
 
     from adapters.market_data.polygon_adapter import PolygonAdapter
+    from data import duckdb_cache as _duckdb_cache
     from data.db import init_db
     from data.fetcher import _cache_write
 
@@ -182,13 +183,20 @@ def backfill(
             continue
 
         counts[ticker] = len(bars)
-        cache_hit = False
+        sqlite_cached = False
+        duckdb_cached = False
         if cacheable and bars:
             try:
                 df = _bars_to_dataframe(bars)
                 if not df.empty:
                     _cache_write(ticker, cache_period, df)
-                    cache_hit = True
+                    sqlite_cached = True
+                    # Mirror data/fetcher.fetch_ohlcv: when DuckDB is the
+                    # active TSDB, write through to the columnar cache so
+                    # walk-forward reads do not need a SQLite warm-up hop.
+                    if _duckdb_cache.is_active():
+                        _duckdb_cache.write(ticker, cache_period, df)
+                        duckdb_cached = True
             except Exception as exc:
                 logger.warning(
                     "polygon_backfill: cache write failed",
@@ -202,7 +210,8 @@ def backfill(
             start=start_s,
             end=end_s,
             cache_period=cache_period if cacheable else None,
-            cached=cache_hit,
+            sqlite_cached=sqlite_cached,
+            duckdb_cached=duckdb_cached,
         )
     return counts
 
