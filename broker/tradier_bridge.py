@@ -344,3 +344,88 @@ def place_option_order(
     except Exception as e:
         logger.error("Tradier place_option_order failed: %s", type(e).__name__)
         return None
+
+
+def _occ_symbol(underlying: str, expiry: str, option_type: str, strike: float) -> str:
+    """Build an OCC option symbol — e.g. SPY240621C00450000 for $450 call.
+
+    Format: ``<UNDERLYING><YYMMDD><C|P><strike×1000, 8-digit zero-padded>``.
+    Tradier accepts OCC symbols on multi-leg orders via the ``option_symbol``
+    sub-field, so we use it whenever a leg does not already carry one.
+    """
+    yymmdd = expiry.replace("-", "")[2:]  # 2024-06-21 -> 240621
+    code = "C" if option_type.lower() == "call" else "P"
+    strike_micros = int(round(float(strike) * 1000))
+    return f"{underlying.upper()}{yymmdd}{code}{strike_micros:08d}"
+
+
+def place_multi_leg(
+    legs: list,
+    *,
+    order_type: str = "market",
+    duration: str = "day",
+) -> Optional[dict]:
+    """Submit a multi-leg options order to Tradier.
+
+    Parameters
+    ----------
+    legs       : list of :class:`strategies.options_legs.OptionLeg`
+                 (or anything that exposes the same attributes).
+                 All legs must share the same ``underlying``.
+    order_type : ``market`` | ``debit`` | ``credit`` | ``even`` (Tradier
+                 multi-leg semantics).
+    duration   : ``day`` | ``gtc``.
+
+    Returns the parsed Tradier order dict on success, ``None`` when the
+    bridge is not configured or the request fails. Raises ``ValueError``
+    on a malformed leg list (mixed underlyings, empty list, etc).
+    """
+    if not legs:
+        raise ValueError("place_multi_leg requires at least one leg")
+    underlyings = {leg.underlying.upper() for leg in legs}
+    if len(underlyings) != 1:
+        raise ValueError(
+            f"all legs must share the same underlying, got {sorted(underlyings)}",
+        )
+    underlying = underlyings.pop()
+
+    if not _is_configured():
+        logger.warning("Tradier not configured — multi-leg order not placed")
+        return None
+
+    payload: dict = {
+        "class": "multileg",
+        "symbol": underlying,
+        "type": order_type,
+        "duration": duration,
+    }
+    for idx, leg in enumerate(legs):
+        sym = leg.option_symbol or _occ_symbol(
+            leg.underlying, leg.expiry, leg.option_type, leg.strike,
+        )
+        payload[f"option_symbol[{idx}]"] = sym
+        payload[f"side[{idx}]"] = leg.side
+        payload[f"quantity[{idx}]"] = str(leg.qty)
+
+    try:
+        import requests
+        cfg = _get_config()
+        r = requests.post(
+            f"{cfg['base_url']}/accounts/{cfg['account_id']}/orders",
+            headers=_get_headers(),
+            data=payload,
+            timeout=10,
+        )
+        r.raise_for_status()
+        data = r.json()
+        order_data = data.get("order", data)
+        return {
+            "order_id": str(order_data.get("id", "")),
+            "status": order_data.get("status", "unknown"),
+            "underlying": underlying,
+            "legs": len(legs),
+            "order_type": order_type,
+        }
+    except Exception as e:
+        logger.error("Tradier place_multi_leg failed: %s", type(e).__name__)
+        return None
