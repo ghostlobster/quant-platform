@@ -196,6 +196,18 @@ jobs:
             --cov-report=term \
             --junitxml=test-results-e2e.xml
 
+      # Per-test + total wall-clock budget (#221) — fails when any e2e
+      # test exceeds E2E_MAX_TEST_SECONDS (default 3.0 s) or the suite
+      # total exceeds E2E_MAX_TOTAL_SECONDS (default 30 s). Catches the
+      # mild perf regression that the global 60 s pytest timeout would
+      # miss (chain silently grows from 200 ms to 5 s).
+      - name: E2E performance gate
+        run: |
+          python scripts/check_e2e_perf.py test-results-e2e.xml
+        env:
+          E2E_MAX_TEST_SECONDS: "3.0"
+          E2E_MAX_TOTAL_SECONDS: "30.0"
+
       # Per-module coverage floor — every Phase-1 cross-module file the
       # e2e suite is supposed to exercise must show ≥ E2E_MIN_PER_MODULE
       # line coverage. Catches the failure mode where an e2e test silently
