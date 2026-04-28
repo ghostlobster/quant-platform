@@ -47,6 +47,10 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        # full history needed by scripts/check_changed_module_coverage.py
+        # (#215 excellent-test gate) so it can `git diff origin/main...HEAD`.
+        with:
+          fetch-depth: 0
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
@@ -90,6 +94,20 @@ jobs:
       # coverage with no failing test.
       - name: Detect silent skips from missing required deps
         run: python scripts/check_no_silent_skips.py test-results-unit.xml requirements.txt
+
+      # Excellent-test gate (#215) — every Python source file the PR
+      # added/modified must have ≥ CHANGED_MODULE_MIN_PCT (default 85%)
+      # combined coverage. The global 76% floor catches project-average
+      # drift; this catches per-PR drift at the file the contributor
+      # just touched. Skipped on push-to-main since the gate compares
+      # HEAD vs origin/main and there's nothing to diff.
+      - name: Excellent-test gate (changed-module coverage)
+        if: github.event_name == 'pull_request'
+        env:
+          CHANGED_MODULE_MIN_PCT: "85"
+        run: |
+          git fetch origin ${{ github.base_ref }} --depth=1
+          python scripts/check_changed_module_coverage.py coverage.xml origin/${{ github.base_ref }}
 
       # Integration tests — runs tests marked @pytest.mark.integration
       # Currently 0 tests are marked; this step scaffolds the split for future use.
