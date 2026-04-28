@@ -39,8 +39,14 @@ REQUIRED_MODULES: dict[str, float] = {
     # P1.6 — MLflow retrain chain
     "cron/monthly_ml_retrain.py":        70.0,
     # P1.9 — event bus
-    "bus/event_bus.py":                  30.0,
+    "bus/event_bus.py":                  50.0,  # ↑ from 30 after #222 publish/consume e2e
     "bus/events.py":                     75.0,
+    # #222 — ml execute → journal + audit chain
+    "strategies/ml_execution.py":        40.0,
+    # #222 — audit log lifecycle
+    "audit/logger.py":                   60.0,
+    # #222 — paper-to-live promotion gate
+    "providers/broker.py":               40.0,
 }
 
 
