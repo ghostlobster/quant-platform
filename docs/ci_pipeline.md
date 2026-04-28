@@ -126,14 +126,24 @@ For each new e2e file:
 - [ ] Schema invariant: lock the output dict keys downstream consumers
   read (regression net for refactors).
 
-## Off-cycle: weekly mutation testing (#204)
+## Off-cycle: weekly mutation testing (#204, extended #223)
 
 A separate workflow `.github/workflows/mutation.yml` runs `mutmut`
-against the math-heavy modules — `risk/`, `analysis/`,
-`strategies/indicators.py` — every Monday at 06:00 UTC. Mutation
-testing flips operators and constants in source and re-runs the
-suite; tests that still pass mean the original line was exercised
-but the assertions don't actually catch the bug.
+every Monday at 06:00 UTC. Mutation testing flips operators and
+constants in source and re-runs the suite; tests that still pass
+mean the original line was exercised but the assertions don't
+actually catch the bug.
+
+**Mutation surface** (path groups in `setup.cfg [mutmut]`):
+
+| Group | Modules | Killed mostly by |
+|---|---|---|
+| Math (#204) | `risk/`, `analysis/`, `strategies/indicators.py` | unit + property tests (greeks parity, kelly bounds, var fallback, hrp, markowitz) |
+| E2E chain (#223) | `broker/paper_trader.py`, `journal/trading_journal.py`, `bus/event_bus.py`, `audit/` | e2e suite (bracket lifecycle, ml execute → journal, audit log lifecycle, event-bus publish/consume) |
+
+The runner uses the `not integration` selector — both unit AND e2e
+tests participate, so a sign-flip in `broker/paper_trader.py` is
+caught by either layer rather than only the unit slice.
 
 It is **not** a PR gate (each run is ≥ 30 min and the survival rate
 is advisory, not pass/fail). The HTML report is uploaded as an
