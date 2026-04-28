@@ -5,3 +5,8 @@
 # Pinned to a recent stable release; kept off the runtime requirements
 # because mutmut pulls test infrastructure that's irrelevant in prod.
 mutmut>=2.5.0
+# Static type checking (#229) — runs on every PR via .github/workflows/ci.yml
+# typecheck job. Phase 1 scope: providers/, risk/, bus/, journal/ with
+# --strict-optional + --follow-imports=silent. Phase 2 (separate ticket)
+# extends to analysis/ once the torch/sklearn type stub gaps are resolved.
+mypy>=1.10.0

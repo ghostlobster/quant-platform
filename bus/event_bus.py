@@ -48,7 +48,7 @@ logger = structlog.get_logger(__name__)
 try:
     import redis as _redis
 except ImportError:
-    _redis = None  # type: ignore[assignment]
+    _redis = None
 
 
 def _is_enabled() -> bool:
