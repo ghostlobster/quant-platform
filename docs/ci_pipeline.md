@@ -9,7 +9,7 @@ the **only** required check on `main`.
 |---|---|---|
 | `lint` | `ruff check .` | n/a |
 | `security` | `bandit -ll` (HIGH-only) + `pip-audit` | n/a |
-| `Test (Python 3.11)` | unit tests (`-m "not integration and not e2e"`) + integration scaffold + silent-skip guard (`scripts/check_no_silent_skips.py`, #199) | 76% combined line+branch floor (#200) — **gates merges** |
+| `Test (Python 3.11)` | unit tests (`-m "not integration and not e2e"`) + integration scaffold + silent-skip guard (#199) + **excellent-test gate** (`scripts/check_changed_module_coverage.py`, #215) | 76% combined line+branch floor (#200) + per-PR ≥ 85% on every changed source file (#215) — **gates merges** |
 | `E2E (Python 3.11)` | end-to-end regression suite (`-m e2e`) | per-module floor via `scripts/check_e2e_coverage.py` (each cross-module file ≥ 40 %, with hand-tightened bumps) — **gates merges** |
 | `Merge gate` | depends on all four above; verifies `needs.*.result` for every parent | n/a — pure dependency aggregator |
 
