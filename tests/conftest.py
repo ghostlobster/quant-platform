@@ -168,12 +168,13 @@ def inject_journal_failure(monkeypatch):
 def trip_killswitch(tmp_path, monkeypatch):
     """Return a factory that touches the kill-switch flag file mid-test.
 
-    The flag location is pointed at a tmp file; the calling test can
-    check ``os.path.exists(flag)`` after invoking ``trip_killswitch()``
-    and verify the broker rejection path.
+    The flag location is pointed at a tmp file via ``KILLSWITCH_FILE``
+    (the env var ``risk/pretrade_guard.py:GuardLimits._from_env`` reads).
+    The calling test invokes the factory to trip the switch, then
+    verifies the broker rejection path.
     """
     flag = tmp_path / ".killswitch"
-    monkeypatch.setenv("KILLSWITCH_PATH", str(flag))
+    monkeypatch.setenv("KILLSWITCH_FILE", str(flag))
 
     def _factory():
         flag.touch()
