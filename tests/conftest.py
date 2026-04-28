@@ -12,6 +12,19 @@ Also exposes shared e2e fixtures (``e2e_paper_env``, ``e2e_journal_db``,
 The fixtures are name-prefixed ``e2e_`` so unit tests that reuse the
 same names (``paper_env``, ``journal_db``) still resolve to their own
 file-level fixtures and pay no fee for the shared ones.
+
+Determinism trio (#227)
+-----------------------
+* ``_seed_rngs`` — autouse session-scope seed hook that pins
+  ``random``, ``numpy.random``, and the system hash. Per-test tweaks
+  remain available via ``np.random.seed(...)`` inside the test.
+* ``frozen_time`` — wraps ``freezegun.freeze_time`` so any test that
+  reads the wall clock (``datetime.now()``, ``time.time()``) can run
+  at a fixed instant. Pull the fixture and use it as a context
+  manager.
+* Hypothesis ``ci`` profile — pinned seed, deadline disabled,
+  derandomised. Loaded for ``pytest`` runs so shrinking is
+  reproducible across CI runs.
 """
 from __future__ import annotations
 
@@ -21,8 +34,66 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
 os.environ.setdefault("MKL_NUM_THREADS", "1")
 os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
+# PYTHONHASHSEED is consumed by the interpreter at startup, so setting
+# it here only takes effect for child processes spawned by tests
+# (subprocess, multiprocessing). Setting it explicitly anyway because
+# coverage tools and pytest-xdist subprocesses inherit it.
+os.environ.setdefault("PYTHONHASHSEED", "0")
 
 import pytest
+
+# ── Determinism trio (#227) ─────────────────────────────────────────────────
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _seed_rngs():
+    """Pin ``random`` and ``numpy.random`` seeds at session start.
+
+    Per-test calls (``np.random.seed(42)`` etc.) still win — this only
+    sets the floor so a test that *forgets* to seed gets a stable
+    starting point instead of "whatever was left over from the
+    previous test".
+    """
+    import random
+
+    import numpy as np
+
+    random.seed(0)
+    np.random.seed(0)
+    yield
+
+
+@pytest.fixture
+def frozen_time():
+    """Yield ``freezegun.freeze_time`` — pull as a context manager.
+
+    Usage::
+
+        def test_x(frozen_time):
+            with frozen_time("2025-01-15 09:30:00"):
+                ...   # datetime.now() == 2025-01-15 09:30:00
+    """
+    from freezegun import freeze_time
+    return freeze_time
+
+
+# ── Hypothesis profile pinning ──────────────────────────────────────────────
+# Loaded once at conftest import time. The `ci` profile is selected by
+# tests/conftest.py itself; nothing else needs to opt in.
+try:
+    from hypothesis import HealthCheck, settings
+
+    settings.register_profile(
+        "ci",
+        derandomize=True,            # pinned seed → reproducible shrink
+        deadline=None,               # property tests can be slow on CI
+        suppress_health_check=[HealthCheck.too_slow],
+        print_blob=True,             # surface the failing example
+    )
+    settings.load_profile("ci")
+except ImportError:
+    pass
+
 
 # ── Shared e2e fixtures ──────────────────────────────────────────────────────
 # Each fixture isolates the chain it touches to a per-test tmp file so a
