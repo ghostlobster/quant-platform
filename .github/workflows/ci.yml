@@ -84,6 +84,13 @@ jobs:
             --cov-fail-under=76 \
             --junitxml=test-results-unit.xml
 
+      # Silent-skip guard (#199) — fails the job if any test was skipped
+      # because a package pinned in requirements.txt failed to import.
+      # Catches the regression where a removed pin or broken wheel lowers
+      # coverage with no failing test.
+      - name: Detect silent skips from missing required deps
+        run: python scripts/check_no_silent_skips.py test-results-unit.xml requirements.txt
+
       # Integration tests — runs tests marked @pytest.mark.integration
       # Currently 0 tests are marked; this step scaffolds the split for future use.
       # Exit code 5 means "no tests collected", which is expected until integration
