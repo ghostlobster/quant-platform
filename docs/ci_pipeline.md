@@ -10,7 +10,7 @@ the **only** required check on `main`.
 | `lint` | `ruff check .` | n/a |
 | `security` | `bandit -ll` (HIGH-only) + `pip-audit` | n/a |
 | `Test (Python 3.11)` | unit tests (`-m "not integration and not e2e"`) + integration scaffold + silent-skip guard (#199) + **excellent-test gate** (`scripts/check_changed_module_coverage.py`, #215) | 76% combined line+branch floor (#200) + per-PR ≥ 85% on every changed source file (#215) — **gates merges** |
-| `E2E (Python 3.11)` | end-to-end regression suite (`-m e2e`) | per-module floor via `scripts/check_e2e_coverage.py` (each cross-module file ≥ 40 %, with hand-tightened bumps) — **gates merges** |
+| `E2E (Python 3.11)` | end-to-end regression suite (`-m e2e`) + perf gate (#221) + cleanup-invariant fixture | per-module floor via `scripts/check_e2e_coverage.py` (each cross-module file ≥ 40 %, with hand-tightened bumps) + per-test ≤ 3 s and total ≤ 30 s via `scripts/check_e2e_perf.py` — **gates merges** |
 | `Merge gate` | depends on all four above; verifies `needs.*.result` for every parent | n/a — pure dependency aggregator |
 
 Splitting unit and e2e into separate jobs follows three best practices:
@@ -101,10 +101,30 @@ pytest tests/ -m "not integration and not e2e"
    - `e2e_journal_db` — journal-only isolation when paper_trader is not in scope.
    - `e2e_isolated_caches` — per-test SQLite + DuckDB cache files; resets the DuckDB connection singleton.
    - `E2EFakeBroker` — minimal `BrokerProvider` stand-in returning both `equity` and `total_value` so it works against the live and the paper paths.
+   - `inject_broker_failure` (#221) — factory; mocks `place_order` to raise after N successful calls.
+   - `inject_journal_failure` (#221) — factory; mocks `journal.log_entry` to raise on next call.
+   - `trip_killswitch` (#221) — factory; touches the kill-switch flag mid-test.
 4. Mock at the network boundary only (HTTP adapter, MLflow registry,
    alert channels). Real SQLite, real journal, real paper trader.
 5. Update `scripts/check_e2e_coverage.py` with any new module the chain
    exercises so the per-module coverage floor catches future drift.
+
+### "Excellent-level" e2e checklist (#221)
+
+For each new e2e file:
+- [ ] Each test completes in ≤ 3 s (otherwise the perf gate fails).
+- [ ] Total e2e suite stays ≤ 30 s (split a chain across multiple
+  files if it pushes the budget).
+- [ ] Cleanup-invariant fixture is on by default (`autouse` for every
+  `@pytest.mark.e2e` test). It asserts no orphan non-daemon threads
+  and that every new `paper_trades` row has a matching `journal_trades`
+  row.
+- [ ] At least one failure-injection variant per happy-path test —
+  exercise the broker-down / journal-fails / kill-switch path.
+- [ ] Tests that intentionally exercise the no-journal-on-fill path
+  must mark themselves `@pytest.mark.e2e_skip_invariant`.
+- [ ] Schema invariant: lock the output dict keys downstream consumers
+  read (regression net for refactors).
 
 ## Off-cycle: weekly mutation testing (#204)
 
