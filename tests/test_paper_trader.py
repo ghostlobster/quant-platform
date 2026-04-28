@@ -86,3 +86,60 @@ def test_circuit_breaker_triggers_on_drawdown():
     conn.close()
     with pytest.raises(RuntimeError, match="Circuit breaker"):
         pt.buy("AAPL", shares=1, price=10.0)
+
+
+# ── Failure-mode coverage (negative-test discipline #231) ──────────────────
+
+
+def test_buy_swallows_journal_failure(monkeypatch):
+    """Documented contract: a journal-write exception during buy() is
+    logged and swallowed — the trade is still recorded in
+    ``paper_trades`` and the position is updated. Operators rely on
+    paper trading never crashing because of a journal-DB hiccup.
+
+    The asymmetry — fill recorded, journal entry missing — is what
+    the e2e cleanup-invariant fixture (#221) catches at the
+    integration layer; this unit test pins the contract at the
+    source.
+    """
+    def _broken_journal(*args, **kwargs):
+        raise RuntimeError("journal disk full")
+
+    monkeypatch.setattr(pt, "_journal_log_entry", _broken_journal)
+
+    # buy must not raise even though the journal hook errors
+    result = pt.buy("AAPL", shares=10, price=150.0)
+    assert result["ticker"] == "AAPL"
+    assert result["shares"] == 10
+
+    # The trade IS recorded in paper_trades regardless
+    history = pt.get_trade_history()
+    assert len(history) == 1
+    assert history.iloc[0]["Ticker"] == "AAPL"
+
+
+def test_sell_swallows_journal_failure(monkeypatch):
+    """Same contract for the sell path."""
+    pt.buy("AAPL", shares=10, price=150.0)  # establish position
+
+    def _broken_journal(*args, **kwargs):
+        raise RuntimeError("journal disk full")
+
+    monkeypatch.setattr(pt, "_journal_log_entry", _broken_journal)
+    result = pt.sell("AAPL", shares=5, price=160.0)
+    assert result["ticker"] == "AAPL"
+    assert result["shares"] == 5
+    # paper_trades grew by 1 (the SELL row); buy was already in there
+    assert len(pt.get_trade_history()) == 2
+
+
+def test_buy_with_journal_module_unavailable(monkeypatch):
+    """When the journal module isn't importable at all
+    (``_journal_log_entry is None``), buy() takes the disabled-hook
+    branch and still completes. Documented in the module-level
+    comment around line 38."""
+    monkeypatch.setattr(pt, "_journal_log_entry", None)
+    result = pt.buy("AAPL", shares=10, price=150.0)
+    assert result["ticker"] == "AAPL"
+    # Trade still recorded
+    assert len(pt.get_trade_history()) == 1
