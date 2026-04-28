@@ -319,6 +319,38 @@ Copy `.env.example` to `.env` and populate the relevant keys. Key variables:
 - Fixtures for DB setup should use in-memory SQLite (`:memory:`) or temp files
 - Aim to keep unit tests fast (< 1s each)
 
+### Bug-regression discipline (#230)
+
+Every fixed bug ships with a permanent regression test. Tag the test
+with the issue number using a `# regression test for #NNN` comment
+on the line above the test function so reviewers can find it during
+code review:
+
+```python
+# regression test for #183 — PreTradeGuard read `equity` only,
+# missing the paper broker's `total_value` key
+def test_guard_accepts_paper_broker_equity():
+    ...
+```
+
+The PR description must call out either the regression test OR (in
+rare cases — e.g. the bug is environmental and impossible to
+reproduce in a test) explicitly explain why a regression test
+isn't possible. The PR template at
+[`.github/PULL_REQUEST_TEMPLATE.md`](.github/PULL_REQUEST_TEMPLATE.md)
+carries the checkbox.
+
+### Negative-test discipline (#231)
+
+Every public function on a critical path (`broker/`, `journal/`,
+`risk/`, `audit/`, `bus/`) ships **at least one happy-path test
+AND at least one failure-mode test** (raise, return None, empty
+input, etc.). The Phase-1 e2e injection fixtures
+(`inject_broker_failure`, `inject_journal_failure`,
+`trip_killswitch` in `tests/conftest.py`) are the unit-suite
+equivalent — pull them in with the same fixture-based pattern
+where possible.
+
 ### Running a Specific Test
 
 ```bash
