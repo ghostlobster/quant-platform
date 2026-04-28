@@ -46,21 +46,26 @@ jobs:
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
 
-      # Verify the unit suite is green before we start mutating — a
-      # pre-existing failure would make every mutant "killed" by that
-      # same failure, polluting the survival statistics.
-      - name: Smoke test (suite must be green)
-        run: pytest tests/ -m "not integration and not e2e" -q --tb=line
+      # Verify the unit AND e2e suites are green before we start
+      # mutating — a pre-existing failure would make every mutant
+      # "killed" by that same failure, polluting the survival
+      # statistics. e2e is included because #223 added e2e chain
+      # modules to the mutation surface.
+      - name: Smoke test (unit + e2e must be green)
+        run: pytest tests/ -m "not integration" -q --tb=line
 
       - name: Run mutmut
         # mutmut returns non-zero when there are surviving mutants —
         # which is information, not a CI failure on this advisory job.
+        # Path / runner config lives in setup.cfg [mutmut]; the CLI
+        # flags here are kept in sync with that file so a manual
+        # ``workflow_dispatch`` run uses the same surface.
         continue-on-error: true
         run: |
           mutmut run \
-            --paths-to-mutate "risk/,analysis/,strategies/indicators.py" \
+            --paths-to-mutate "risk/,analysis/,strategies/indicators.py,broker/paper_trader.py,journal/trading_journal.py,bus/event_bus.py,audit/" \
             --tests-dir tests/ \
-            --runner 'python -m pytest -x -q -m "not integration and not e2e" --no-header --tb=no' \
+            --runner 'python -m pytest -x -q -m "not integration" --no-header --tb=no' \
             --use-coverage
 
       - name: Generate HTML report
