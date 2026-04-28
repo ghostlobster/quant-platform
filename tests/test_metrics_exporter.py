@@ -220,3 +220,49 @@ def test_broker_failure_collapses_to_zero(isolated_portfolio_history):
 
     snap = me.compute_risk_snapshot(ExplodingBroker())
     assert snap == me.RiskSnapshot(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+
+
+# ── 11. Failure-mode coverage (negative-test discipline #231) ───────────────
+
+
+def test_get_positions_failure_collapses_to_zero(isolated_portfolio_history):
+    """Counterpart to #10 — the other broker call (``get_positions``)
+    raising must also collapse to a zero snapshot rather than
+    propagate. Operators rely on the metrics exporter never crashing
+    its scheduler tick because of a broker hiccup."""
+    class HalfBrokenBroker:
+        def get_account_info(self):
+            return {"equity": 100_000.0}
+
+        def get_positions(self):
+            raise RuntimeError("positions endpoint down")
+
+    snap = me.compute_risk_snapshot(HalfBrokenBroker())
+    assert snap == me.RiskSnapshot(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+
+
+def test_no_alert_fired_when_broker_raises(monkeypatch, isolated_portfolio_history):
+    """When the broker is down, ``compute_risk_snapshot`` returns a
+    zero snapshot. ``maybe_alert_drawdown`` must NOT fire on the
+    resulting drawdown=0 — that would spam alerts on every broker
+    outage. Documented invariant: no alert without real data.
+    """
+    class ExplodingBroker:
+        def get_account_info(self):
+            raise RuntimeError("offline")
+
+        def get_positions(self):
+            return []
+
+    monkeypatch.setenv("MAX_DRAWDOWN_PCT", "0.10")
+    fired: list = []
+    monkeypatch.setattr(
+        "alerts.channels.broadcast",
+        lambda subject, body: fired.append((subject, body)),
+    )
+
+    snap = me.compute_risk_snapshot(ExplodingBroker())
+    me.maybe_alert_drawdown(snap)
+    # drawdown == 0 < threshold ⇒ no alert; the broker failure is
+    # surfaced via structlog warning, not an operator notification.
+    assert fired == []

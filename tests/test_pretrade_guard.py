@@ -222,3 +222,84 @@ def test_day_rollover_resets_order_count():
     with pytest.raises(GuardViolation) as exc:
         guard.check("AAPL", 1, "buy")
     assert exc.value.reason == "max_orders_per_day"
+
+
+# ── 10. Failure-mode coverage (negative-test discipline #231) ───────────────
+
+
+def test_account_snapshot_swallows_broker_exception():
+    """``_account_snapshot`` is fail-safe: a broker that raises during
+    ``get_account_info`` must not propagate. The guard sees ``equity=0``.
+
+    Documented contract — fail-open on sizing: when equity is unknown
+    (broker outage) the sizing checks (max_position_pct,
+    max_gross_exposure, max_daily_loss_pct) are **skipped** rather
+    than tripped. Order-flow gates (kill-switch, blocklist, rate
+    limit) keep working. Rationale: with no equity info the guard
+    can't compute meaningful position percentages, and rejecting
+    every order during a broker hiccup would lock the operator out
+    of all trading — including the kill-switch-cancellation flow.
+
+    NOTE: this is a real fail-open and worth a follow-on ticket if
+    we want to flip it to fail-closed (e.g. require a configurable
+    ``DENY_ON_BROKER_OUTAGE=1`` env var). For now this test locks the
+    current behaviour so a refactor doesn't change it accidentally.
+    """
+
+    class _BrokenBroker:
+        def get_account_info(self):
+            raise RuntimeError("broker offline")
+
+        def get_positions(self):
+            return []
+
+    guard = PreTradeGuard(
+        GuardLimits(max_position_pct=0.1),  # sizing limit
+        _BrokenBroker(),
+    )
+    equity, positions = guard._account_snapshot()
+    assert equity == 0.0
+    assert positions == []
+
+    # Order-flow gates still work — kill-switch, blocklist, rate limit.
+    # Sizing-only limits are skipped at equity=0, so the call does NOT
+    # raise. Lock that.
+    guard.check("AAPL", 100, "buy", limit_price=150.0)  # no exception
+
+
+def test_account_snapshot_handles_get_positions_exception():
+    """A broker whose ``get_positions`` raises is treated the same as
+    the get_account_info failure — the guard doesn't propagate. Both
+    halves are in the same try block so either failure trips the
+    fall-back together."""
+
+    class _PartialBroker:
+        def get_account_info(self):
+            return {"equity": 100_000.0}
+
+        def get_positions(self):
+            raise RuntimeError("positions endpoint flaky")
+
+    guard = PreTradeGuard(
+        GuardLimits(max_gross_exposure=50_000.0),
+        _PartialBroker(),
+    )
+    equity, positions = guard._account_snapshot()
+    assert equity == 0.0  # both halves in one try → either failure → 0
+    assert positions == []
+
+
+def test_account_snapshot_handles_unparseable_equity():
+    """Equity that's a string ('100k') or a dict-shaped blob falls back
+    to 0 rather than blowing up the float() conversion."""
+
+    class _GarbageBroker:
+        def get_account_info(self):
+            return {"equity": "one hundred thousand"}
+
+        def get_positions(self):
+            return []
+
+    guard = PreTradeGuard(GuardLimits(max_position_pct=0.1), _GarbageBroker())
+    equity, _ = guard._account_snapshot()
+    assert equity == 0.0
