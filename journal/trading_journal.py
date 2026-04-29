@@ -110,6 +110,10 @@ def log_entry(
                 ),
             )
             trade_id = cur.lastrowid
+        # ``cur.lastrowid`` is typed Optional[int] but the INSERT above
+        # always yields a row, so the value is non-None here. Cast
+        # explicitly so callers see ``int`` and mypy is satisfied.
+        assert trade_id is not None
         logger.info(
             "Journal entry: %s %s x%d @ $%.4f (id=%d)",
             side, ticker, int(qty), float(price), trade_id,
@@ -155,9 +159,9 @@ def log_exit(
 
 
 def get_journal(
-    start_date: str = None,
-    end_date: str = None,
-    ticker: str = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    ticker: str | None = None,
 ) -> pd.DataFrame:
     """
     Return journal rows as a DataFrame; all filters optional.

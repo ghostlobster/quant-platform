@@ -1,13 +1,14 @@
 # CI Pipeline Layout
 
-The platform's GitHub Actions pipeline runs **five** jobs on every push
-to `main` and every PR targeting `main`. The first four run in parallel;
-the fifth is the umbrella merge gate that depends on all of them and is
+The platform's GitHub Actions pipeline runs **six** jobs on every push
+to `main` and every PR targeting `main`. The first five run in parallel;
+the sixth is the umbrella merge gate that depends on all of them and is
 the **only** required check on `main`.
 
 | Job | Owns | Coverage gate |
 |---|---|---|
 | `lint` | `ruff check .` | n/a |
+| `typecheck` | `mypy` against `providers/`, `risk/`, `bus/`, `journal/` with `--strict-optional` (#229) | n/a |
 | `security` | `bandit -ll` (HIGH-only) + `pip-audit` | n/a |
 | `Test (Python 3.11)` | unit tests (`-m "not integration and not e2e"`) + integration scaffold + silent-skip guard (#199) + **excellent-test gate** (`scripts/check_changed_module_coverage.py`, #215) | 76% combined line+branch floor (#200) + per-PR ≥ 85% on every changed source file (#215) — **gates merges** |
 | `E2E (Python 3.11)` | end-to-end regression suite (`-m e2e`) + perf gate (#221) + cleanup-invariant fixture | per-module floor via `scripts/check_e2e_coverage.py` (each cross-module file ≥ 40 %, with hand-tightened bumps) + per-test ≤ 3 s and total ≤ 30 s via `scripts/check_e2e_perf.py` — **gates merges** |
@@ -53,7 +54,7 @@ Merge gate
 ```
 
 The `merge-gate` job in `.github/workflows/ci.yml` declares
-`needs: [lint, security, test, e2e]` with `if: always()` and explicitly
+`needs: [lint, typecheck, security, test, e2e]` with `if: always()` and explicitly
 fails when any upstream job's `result` is not `success` or `skipped`.
 Adding a future job (e.g. `integration`) to the pipeline only requires
 extending the `needs:` array — branch protection never has to change.

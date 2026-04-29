@@ -75,7 +75,7 @@ def black_scholes_price(S: float, K: float, T: float, r: float,
 
 def compute_greeks(S: float, K: float, T: float, r: float,
                    sigma: float, option_type: str,
-                   contract_price: float = None) -> Greeks:
+                   contract_price: float | None = None) -> Greeks:
     """Returns Greeks dataclass. Uses pure math (no scipy).
 
     Theta is expressed as daily $ decay per single contract (100 shares).
