@@ -9,7 +9,7 @@ the **only** required check on `main`.
 |---|---|---|
 | `lint` | `ruff check .` | n/a |
 | `typecheck` | `mypy` against `providers/`, `risk/`, `bus/`, `journal/` with `--strict-optional` (#229) | n/a |
-| `security` | `bandit -ll` (HIGH-only) + `pip-audit` | n/a |
+| `security` | `bandit -ll` (HIGH-only) + `pip-audit` + SARIF upload to GitHub code scanning (#238) | n/a |
 | `Test (Python 3.11)` | unit tests (`-m "not integration and not e2e"`) + integration scaffold + silent-skip guard (#199) + **excellent-test gate** (`scripts/check_changed_module_coverage.py`, #215) | 76% combined line+branch floor (#200) + per-PR ≥ 85% on every changed source file (#215) — **gates merges** |
 | `E2E (Python 3.11)` | end-to-end regression suite (`-m e2e`) + perf gate (#221) + cleanup-invariant fixture | per-module floor via `scripts/check_e2e_coverage.py` (each cross-module file ≥ 40 %, with hand-tightened bumps) + per-test ≤ 3 s and total ≤ 30 s via `scripts/check_e2e_perf.py` — **gates merges** |
 | `Merge gate` | depends on all four above; verifies `needs.*.result` for every parent | n/a — pure dependency aggregator |
@@ -195,5 +195,5 @@ only — no dev deps required.
 |---|---|---|
 | `pytest.ini` `addopts` | `--strict-markers --strict-config --tb=short` | Typos in marker names fail loud; short tracebacks keep PR comments readable. |
 | `pytest.ini` `timeout` | `60 s` per test (`thread` method) | Catches a hung test before it eats the 15-min job budget. Provided by `pytest-timeout`. |
-| `requirements.txt` | `pytest-timeout`, `pytest-xdist` | Available for parallel runs once the suite outgrows a single worker; not enabled by default because xdist startup overhead dominates at the current 16-test size. |
+| `requirements.txt` | `pytest-timeout`, `pytest-xdist`, `pytest-randomly` (#237) | Auto-loaded by pytest. CI pins `--randomly-seed=20260428` for determinism so the gate never flakes on a randomly-bad ordering; local runs without the flag use a fresh seed each time to surface new order-dependent tests. |
 | `tests/conftest.py` env | `OMP_NUM_THREADS=1` etc. | Prevents OpenBLAS background threads from triggering `std::terminate()` during interpreter shutdown on CI. |
