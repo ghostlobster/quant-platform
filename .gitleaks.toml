@@ -1,0 +1,34 @@
+# gitleaks config (#249) — extends the default rule set with a
+# minimal allowlist for known false positives.
+#
+# Default ruleset: https://github.com/gitleaks/gitleaks/blob/master/config/gitleaks.toml
+# That covers AWS / GitHub / Slack / Stripe / OpenAI / Anthropic /
+# generic high-entropy strings. We don't override or disable any of
+# those — the only customisation here is the allowlist.
+
+# Inherit the bundled default rules.
+[extend]
+useDefault = true
+
+# Allowlist — patterns gitleaks shouldn't flag.
+[allowlist]
+description = "false positives that the default ruleset can't distinguish"
+
+# Files / paths that legitimately contain secret-shaped placeholders.
+paths = [
+  '''^\.env\.example$''',          # placeholder values like "your_paper_api_key_here"
+  '''^docs/.*\.md$''',             # docs sometimes show example tokens in code blocks
+  '''^tests/cassettes/.*''',       # future VCR.py cassettes (#245); auth headers are
+                                   # filtered before record by the test fixture, so
+                                   # cassette files committed here are pre-redacted
+]
+
+# Specific regex patterns that look like secrets but aren't.
+regexes = [
+  # ".env.example" placeholders consistently use the suffix "_here"
+  # (e.g. ALPACA_API_KEY=your_paper_api_key_here). Belt-and-braces
+  # in case the file allowlist above is bypassed.
+  '''_here$''',
+  # Schwab token PATH config, not a token value.
+  '''SCHWAB_TOKEN_PATH=\.schwab_token\.json''',
+]
