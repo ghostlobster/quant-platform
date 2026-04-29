@@ -60,7 +60,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.11" }
-      - run: pip install bandit pip-audit
+      # ``bandit-sarif-formatter`` registers the ``-f sarif`` formatter
+      # bandit lacks natively (#238). Without it bandit errors with
+      # "invalid choice: 'sarif'".
+      - run: pip install bandit pip-audit bandit-sarif-formatter
       # Emit both JSON (used by the HIGH-severity gate below) and SARIF
       # (uploaded to GitHub code scanning so findings show up in the
       # repo Security tab + as PR-line annotations).
