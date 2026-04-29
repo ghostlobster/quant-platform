@@ -1,0 +1,97 @@
+name: Flake Detection
+
+# Weekly flake-detection job (#228). Runs the unit suite N times in
+# independent pytest invocations and aggregates the per-test
+# pass/fail breakdown.
+#
+# Why N independent runs (not pytest-rerunfailures or pytest-repeat):
+# both plugins re-run failing tests within a single pytest process,
+# which obscures whether the failure is reproducible across fresh
+# interpreter invocations. Independent runs surface flake from RNG
+# drift, BLAS thread races, file-system ordering, etc.
+#
+# Cadence: weekly is the right balance — re-running 5x costs ~5x
+# the unit-job wall clock (~4 min) which is too much per PR but
+# fine once a week.
+#
+# Output: ``flake-report.md`` artefact uploaded for review. Operators
+# look at the GitHub-rendered table; tests with 0 < fails < runs are
+# the actual flakes.
+
+on:
+  schedule:
+    - cron: "30 6 * * 1"   # Mondays at 06:30 UTC, 30 min after mutmut
+  workflow_dispatch:        # allow manual runs from the Actions tab
+    inputs:
+      n_runs:
+        description: "Number of independent pytest runs to aggregate"
+        required: false
+        default: "5"
+
+permissions:
+  contents: read
+
+jobs:
+  detect-flakes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-flake-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-flake-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest-cov
+
+      # N independent runs. Each invocation gets a fresh interpreter
+      # so RNG / BLAS thread / file-system race conditions surface.
+      # ``continue-on-error: true`` lets the loop complete even when
+      # individual runs fail — we WANT the failure data for the
+      # aggregator.
+      - name: Run pytest 5x
+        continue-on-error: true
+        run: |
+          n_runs="${{ github.event.inputs.n_runs || 5 }}"
+          for i in $(seq 1 "$n_runs"); do
+            echo "::group::Run $i / $n_runs"
+            pytest tests/ -m "not integration and not e2e" \
+              --junitxml=run-$i.xml \
+              -q --tb=no --no-header || true
+            echo "::endgroup::"
+          done
+
+      - name: Aggregate flake report
+        run: |
+          python scripts/aggregate_flake_runs.py run-*.xml
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flake-report
+          path: |
+            flake-report.md
+            run-*.xml
+
+      - name: Print report to job summary
+        if: always()
+        run: |
+          if [ -f flake-report.md ]; then
+            cat flake-report.md >> "$GITHUB_STEP_SUMMARY"
+          fi

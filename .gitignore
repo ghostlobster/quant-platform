@@ -70,3 +70,9 @@ audit/log/
 .mutmut-cache
 html/
 mutation-summary.txt
+
+# Flake-detection artefacts (#228) — generated locally by
+# scripts/aggregate_flake_runs.py; the CI workflow uploads them as
+# artefacts. Never commit.
+flake-report.md
+run-*.xml

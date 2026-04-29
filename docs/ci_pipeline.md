@@ -155,6 +155,40 @@ Manual runs are available from the Actions tab via
 Dev-only deps live in `requirements-dev.txt`; runtime deps are
 unaffected.
 
+## Off-cycle: weekly flake detection (#228)
+
+A separate workflow `.github/workflows/flake_detection.yml` runs the
+unit suite **5 times in independent pytest invocations** every
+Monday at 06:30 UTC (30 min after mutmut). The aggregator at
+`scripts/aggregate_flake_runs.py` reads each run's junit XML and
+produces `flake-report.md` listing every test with a per-run
+pass/fail breakdown.
+
+**Why N independent runs** (not `pytest-rerunfailures` or
+`pytest-repeat`): both plugins re-run failing tests within a single
+pytest process, which obscures whether a failure is reproducible
+across fresh interpreter invocations. Independent runs surface flake
+from RNG drift, BLAS thread races, file-system ordering — exactly
+the failure modes a flake detector should catch.
+
+**What the report shows**:
+- Tests that always pass → not in the report (stable + green)
+- Tests that always fail → not in the report (broken, not flaky;
+  surfaced by the standard PR-gate run)
+- Tests with `0 < fails < runs` → the actual flakes, sorted by
+  fail count descending
+
+It is **not** a PR gate (running the suite 5x costs ~5x the unit
+job's wall clock — too much per PR, fine once a week). Review the
+artefact each Monday and either fix the flake at source or add it
+to a known-flake allowlist with a tracking ticket.
+
+Manual runs are available from the Actions tab via
+`workflow_dispatch` (with an optional `n_runs` input override).
+
+The flake-detection workflow uses the standard `requirements.txt`
+only — no dev deps required.
+
 ## Best-practice config
 
 | Setting | Value | Why |
