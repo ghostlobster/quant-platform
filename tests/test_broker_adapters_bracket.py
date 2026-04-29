@@ -214,9 +214,14 @@ def test_ibkr_adapter_place_bracket_guard_rejects(monkeypatch):
     # Force the ibapi availability flag without actually importing ibapi.
     import adapters.broker.ibkr_adapter as ibkr_mod
 
-    monkeypatch.setattr(
-        "broker.ibkr_bridge._IB_AVAILABLE", True,
-    )
+    # Patch via the adapter's own ``_bridge`` reference rather than the
+    # dotted-string path. ``test_ibkr_bridge.py`` pops
+    # ``broker.ibkr_bridge`` from ``sys.modules`` to test the missing-
+    # dep path; if it runs before this test (random order), the
+    # dotted-string monkeypatch would resolve to a fresh module and
+    # leave ``ibkr_mod._bridge`` (the stale reference the adapter
+    # actually uses) untouched.
+    monkeypatch.setattr(ibkr_mod._bridge, "_IB_AVAILABLE", True)
     broker = ibkr_mod.IBKRAdapter()
     intent = OrderIntent(symbol="AAPL", qty=5, side="buy", stop_loss=95.0)
     result = broker.place_bracket(intent)
@@ -227,9 +232,7 @@ def test_ibkr_adapter_place_bracket_guard_rejects(monkeypatch):
 def test_ibkr_adapter_place_bracket_not_implemented(monkeypatch):
     import adapters.broker.ibkr_adapter as ibkr_mod
 
-    monkeypatch.setattr(
-        "broker.ibkr_bridge._IB_AVAILABLE", True,
-    )
+    monkeypatch.setattr(ibkr_mod._bridge, "_IB_AVAILABLE", True)
     monkeypatch.delenv("SYMBOL_BLOCKLIST", raising=False)
     broker = ibkr_mod.IBKRAdapter()
     intent = OrderIntent(symbol="AAPL", qty=5, side="buy", stop_loss=95.0)

@@ -52,19 +52,37 @@ jobs:
   security:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      # required for github/codeql-action/upload-sarif (#238 / T2.5)
+      security-events: write
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.11" }
       - run: pip install bandit pip-audit
-      - name: Bandit static analysis
+      # Emit both JSON (used by the HIGH-severity gate below) and SARIF
+      # (uploaded to GitHub code scanning so findings show up in the
+      # repo Security tab + as PR-line annotations).
+      - name: Bandit static analysis (JSON)
         run: bandit -r . -ll --exclude ./.git,./tests -f json -o bandit-report.json || true
+      - name: Bandit static analysis (SARIF)
+        run: bandit -r . -ll --exclude ./.git,./tests -f sarif -o bandit-report.sarif || true
       - name: Check bandit results
         run: python -c "import json,sys; r=json.load(open('bandit-report.json')); highs=[i for i in r['results'] if i['issue_severity']=='HIGH']; print(f'{len(highs)} HIGH severity issues'); sys.exit(1 if highs else 0)"
       - name: pip-audit
         run: pip-audit -r requirements.txt --ignore-vuln PYSEC-2022-42969 || true
       - uses: actions/upload-artifact@v4
         with: { name: bandit-report, path: bandit-report.json }
+      - name: Upload SARIF to GitHub code scanning
+        # ``always()`` so findings surface even when the HIGH-severity
+        # gate fails — operators want to see the offending line, not
+        # just the count.
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: bandit-report.sarif
+          category: bandit
 
   test:
     name: Test (Python 3.11)
@@ -105,10 +123,15 @@ jobs:
       # Coverage uses branch coverage (#200) configured in .coveragerc.
       # The 76 % floor is now line + branch combined, so it's strictly
       # more rigorous than the historical line-only floor.
+      # ``pytest-randomly`` (#237 / T2.3) auto-loads when present; we
+      # pin a seed in CI for determinism so the gate never flakes from
+      # a randomly-bad ordering. Local dev runs use fresh seeds (omit
+      # ``--randomly-seed``) to surface new order-dependent tests.
       - name: Run unit tests
         continue-on-error: false
         run: |
           pytest tests/ -v -m "not integration and not e2e" \
+            --randomly-seed=20260428 \
             --cov=. \
             --cov-report=xml:coverage.xml \
             --cov-report=term-missing \
@@ -218,6 +241,7 @@ jobs:
         continue-on-error: false
         run: |
           pytest tests/ -v -m "e2e" \
+            --randomly-seed=20260428 \
             --cov=. \
             --cov-report=xml:coverage-e2e.xml \
             --cov-report=term \
