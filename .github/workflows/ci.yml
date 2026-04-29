@@ -58,6 +58,22 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
+        # gitleaks scans the diff against the base ref (#249); it
+        # needs full history to compare HEAD vs origin/main on a PR.
+        with: { fetch-depth: 0 }
+
+      # Gitleaks (#249) — server-side safety net for the local
+      # pre-commit hook. Catches leaked tokens in the diff even when
+      # a contributor hasn't installed pre-commit locally. Config in
+      # .gitleaks.toml; bypass-with-justification supported via
+      # ``# gitleaks:allow`` inline comment.
+      - name: Gitleaks (secret scan)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Action default is to scan only the PR diff, which matches
+          # the local pre-commit hook's behaviour and keeps the run fast.
+
       - uses: actions/setup-python@v5
         with: { python-version: "3.11" }
       # ``bandit-sarif-formatter`` registers the ``-f sarif`` formatter

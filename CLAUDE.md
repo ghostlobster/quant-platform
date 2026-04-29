@@ -80,8 +80,17 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env        # fill in API keys
-bash run.sh                 # starts Streamlit on :8501
+pip install pre-commit       # secret-scan + lint hooks (#249)
+pre-commit install           # one-time per clone
+bash run.sh                  # starts Streamlit on :8501
 ```
+
+The `pre-commit install` step wires `gitleaks` into every `git commit`
+to catch leaked API keys / tokens before they enter the local history.
+CI runs the same check via `gitleaks/gitleaks-action` so devs without
+the local hook still get caught at PR time, but the pre-commit gate is
+the cheaper layer (it fires before the commit lands, not after the push
+is rejected). False positives go in `.gitleaks.toml`.
 
 ### Running Tests
 
