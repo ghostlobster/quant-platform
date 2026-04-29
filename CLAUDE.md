@@ -351,6 +351,25 @@ input, etc.). The Phase-1 e2e injection fixtures
 equivalent — pull them in with the same fixture-based pattern
 where possible.
 
+### Synthetic-data factories (#239)
+
+[`tests/factories.py`](tests/factories.py) is the **single source
+of truth** for synthetic OHLCV / returns / prices / feature
+matrices. New tests pull the helper that fits:
+
+```python
+from tests.factories import make_ohlcv, make_returns, make_prices
+
+df = make_ohlcv(n=60, seed=7)         # canonical capitalised-column OHLCV
+r  = make_returns(n=252, sigma=0.02)  # daily-return series
+p  = make_prices(n=200, last=110.0)   # constant-price for SMA tests
+```
+
+Each factory is fully deterministic given its `seed` argument so
+tests don't depend on the determinism trio (#227) for stability.
+Legacy in-file helpers in older `tests/test_*.py` will migrate
+over time; new tests should reach for `tests.factories` first.
+
 ### Running a Specific Test
 
 ```bash
