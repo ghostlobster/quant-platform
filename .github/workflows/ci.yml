@@ -130,10 +130,18 @@ jobs:
       # pin a seed in CI for determinism so the gate never flakes from
       # a randomly-bad ordering. Local dev runs use fresh seeds (omit
       # ``--randomly-seed``) to surface new order-dependent tests.
+      #
+      # ``-n auto`` enables pytest-xdist (#240 / Tier-3) so the unit
+      # suite runs in parallel across the runner's cores. The cleanup-
+      # invariant fixture (#221) is per-worker safe — ``tmp_path`` and
+      # ``monkeypatch`` are isolated per worker by pytest. The e2e job
+      # below stays serial because its perf gate (#221) and per-module
+      # coverage floor measure single-worker behaviour.
       - name: Run unit tests
         continue-on-error: false
         run: |
           pytest tests/ -v -m "not integration and not e2e" \
+            -n auto \
             --randomly-seed=20260428 \
             --cov=. \
             --cov-report=xml:coverage.xml \

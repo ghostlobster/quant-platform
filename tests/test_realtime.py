@@ -287,7 +287,11 @@ class TestPollingExceptions:
 
         with patch('yfinance.Ticker', side_effect=bad_ticker):
             feed.subscribe(['AAPL'])
-            deadline = time.time() + 2.0
+            # 5 s deadline — under xdist + coverage instrumentation the
+            # original 2 s was tight enough that CPU contention could
+            # starve the polling thread. 5 s stays well under the
+            # 60 s pytest-timeout per-test cap.
+            deadline = time.time() + 5.0
             while time.time() < deadline:
                 if feed.get_all_quotes():
                     break

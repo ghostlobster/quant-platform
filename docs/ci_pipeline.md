@@ -195,5 +195,5 @@ only — no dev deps required.
 |---|---|---|
 | `pytest.ini` `addopts` | `--strict-markers --strict-config --tb=short` | Typos in marker names fail loud; short tracebacks keep PR comments readable. |
 | `pytest.ini` `timeout` | `60 s` per test (`thread` method) | Catches a hung test before it eats the 15-min job budget. Provided by `pytest-timeout`. |
-| `requirements.txt` | `pytest-timeout`, `pytest-xdist`, `pytest-randomly` (#237) | Auto-loaded by pytest. CI pins `--randomly-seed=20260428` for determinism so the gate never flakes on a randomly-bad ordering; local runs without the flag use a fresh seed each time to surface new order-dependent tests. |
+| `requirements.txt` | `pytest-timeout`, `pytest-xdist`, `pytest-randomly` (#237) | Auto-loaded by pytest. CI pins `--randomly-seed=20260428` for determinism so the gate never flakes on a randomly-bad ordering; local runs without the flag use a fresh seed each time to surface new order-dependent tests. CI's unit job runs with `-n auto` (xdist, #240); the e2e job stays serial so its perf gate (#221) and per-module coverage floor measure single-worker behaviour. |
 | `tests/conftest.py` env | `OMP_NUM_THREADS=1` etc. | Prevents OpenBLAS background threads from triggering `std::terminate()` during interpreter shutdown on CI. |
