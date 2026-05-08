@@ -12,6 +12,7 @@ Usage
     md     = get_market_data()  # reads MARKET_DATA_PROVIDER env var
 """
 from providers.alert import AlertProvider, get_alert_channel
+from providers.auth import OAuthProvider, get_oauth_providers
 from providers.broker import BrokerProvider, get_broker
 from providers.execution_algo import ExecutionAlgoProvider, get_execution_algo
 from providers.feature_store import FeatureStoreProvider, get_feature_store
@@ -25,6 +26,7 @@ __all__ = [
     "MarketDataProvider", "get_market_data",
     "BrokerProvider", "get_broker",
     "AlertProvider", "get_alert_channel",
+    "OAuthProvider", "get_oauth_providers",
     "SentimentProvider", "get_sentiment",
     "ExecutionAlgoProvider", "get_execution_algo",
     "TSDBProvider", "get_tsdb",

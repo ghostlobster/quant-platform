@@ -17,6 +17,14 @@ ALPACA_BASE_URL = os.getenv("ALPACA_BASE_URL", "https://paper-api.alpaca.markets
 APP_ENV = os.getenv("APP_ENV", "development")
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 
+# OAuth credentials — loaded from .env; never hardcoded.
+# Set GOOGLE_CLIENT_ID to enable Google login; GITHUB_CLIENT_ID to enable GitHub login.
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
+GITHUB_CLIENT_ID = os.getenv("GITHUB_CLIENT_ID", "")
+GITHUB_CLIENT_SECRET = os.getenv("GITHUB_CLIENT_SECRET", "")
+APP_BASE_URL = os.getenv("APP_BASE_URL", "http://localhost:8501")
+
 
 def configure_logging():
     log_format = os.getenv("LOG_FORMAT", "console")  # "console" | "json"

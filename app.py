@@ -8,6 +8,7 @@ import streamlit as st
 import structlog as _bootstrap_structlog
 
 import config
+from auth.session import is_authenticated
 from broker.paper_trader import init_paper_tables
 from data.db import init_db
 from journal.trading_journal import init_journal_table
@@ -23,6 +24,9 @@ from pages import (
     portfolio,
     screener,
     shared,
+)
+from pages import (
+    login as _login_page,
 )
 from scheduler.alerts import init_alerts_table, start_knowledge_health_scheduler
 
@@ -52,6 +56,10 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+if not is_authenticated():
+    _login_page.render()
+    st.stop()
 
 shared.render_sidebar()
 
