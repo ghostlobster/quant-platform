@@ -210,6 +210,17 @@ def init_db() -> None:
                 ON model_feature_stats (model_name, trained_at DESC)
         """)
 
+        # ----- OAuth CSRF state tokens (auth/oauth.py) ----------------
+        # Short-lived rows (TTL 10 min) keyed by the random state param.
+        # Prevents cross-site request forgery during the OAuth callback.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS oauth_states (
+                state       TEXT PRIMARY KEY,
+                provider    TEXT NOT NULL,
+                created_at  REAL NOT NULL    -- Unix timestamp; expires after 600 s
+            )
+        """)
+
         # Seed paper_account if absent
         import os
         starting_cash = float(os.getenv("PAPER_STARTING_CASH", "100000"))

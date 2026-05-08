@@ -63,6 +63,17 @@ def render_sidebar() -> dict:
     st.sidebar.title("📈 Quant Platform")
     st.sidebar.markdown("*Personal Trading Dashboard*")
 
+    # ── User info + logout ────────────────────────────────────────────────────
+    user = st.session_state.get("user")
+    if user:
+        st.sidebar.markdown(
+            f"**{user.get('name', 'User')}** · *{user.get('provider', '')}*"
+        )
+        if st.sidebar.button("Logout", key="_sidebar_logout"):
+            from auth.session import logout
+            logout()
+            st.rerun()
+
     # P1.11 — paper / live mode banner. Live mode goes through the promotion
     # gate; the banner is the visual confirmation operators get before they
     # see real money on the line.
