@@ -156,9 +156,10 @@ class TestGitHubOAuthAdapter:
         user_resp.raise_for_status.return_value = None
 
         emails_resp = MagicMock()
+        # non-matching entry first so the loop's False branch is exercised
         emails_resp.json.return_value = [
-            {"email": "carol@private.com", "primary": True, "verified": True},
             {"email": "carol@other.com", "primary": False, "verified": True},
+            {"email": "carol@private.com", "primary": True, "verified": True},
         ]
         emails_resp.raise_for_status.return_value = None
 
@@ -166,6 +167,27 @@ class TestGitHubOAuthAdapter:
         with patch("adapters.auth.github_adapter.requests.get", side_effect=responses):
             user = adapter.get_user_info("ghtok")
         assert user["email"] == "carol@private.com"
+
+    def test_get_user_info_email_empty_when_no_primary_verified(self):
+        adapter = self._make_adapter()
+        user_resp = MagicMock()
+        user_resp.json.return_value = {
+            "id": 9, "name": "Frank", "login": "frank", "email": None, "avatar_url": "",
+        }
+        user_resp.raise_for_status.return_value = None
+
+        emails_resp = MagicMock()
+        # no entry is both primary AND verified — loop exhausts, returns None
+        emails_resp.json.return_value = [
+            {"email": "frank@notprimary.com", "primary": False, "verified": True},
+            {"email": "frank@notverified.com", "primary": True, "verified": False},
+        ]
+        emails_resp.raise_for_status.return_value = None
+
+        responses = [user_resp, emails_resp]
+        with patch("adapters.auth.github_adapter.requests.get", side_effect=responses):
+            user = adapter.get_user_info("ghtok")
+        assert user["email"] == ""
 
     def test_get_user_info_falls_back_to_login_for_name(self):
         adapter = self._make_adapter()
