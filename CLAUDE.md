@@ -4,7 +4,7 @@ This file provides context for AI assistants (Claude, Copilot, etc.) working in 
 
 ## Project Overview
 
-A production-ready quantitative trading and analytics platform built with **Python 3.11** and **Streamlit**. It supports multi-broker live/paper trading, backtesting, options analytics, portfolio risk, and market screening — all behind a single web dashboard.
+A production-ready quantitative trading and analytics platform built with **Python 3.11** and **Streamlit**. It supports multi-broker live/paper trading, ML-driven alpha generation, backtesting, options analytics, portfolio risk, and market screening — all behind a single web dashboard.
 
 **Entry point:** `streamlit run app.py` → http://localhost:8501
 
@@ -16,34 +16,53 @@ A production-ready quantitative trading and analytics platform built with **Pyth
 quant-platform/
 ├── app.py                  # Streamlit entry point; bootstraps all subsystems
 ├── config.py               # Loads .env vars, configures structlog
-├── requirements.txt        # 63 pinned Python dependencies
+├── requirements.txt        # 73 pinned Python dependencies
+├── requirements-dev.txt    # Dev-only deps (mypy, stubs)
 ├── ruff.toml               # Linter config (line-length 100, E/F/W/I rules)
-├── pytest.ini              # Test discovery config
+├── setup.cfg               # mypy config (Phase-1: providers/, risk/, bus/, journal/)
+├── pytest.ini              # Test discovery config (60s timeout, strict markers)
+├── .coveragerc             # Coverage config (76%+ floor, branch coverage)
+├── .gitleaks.toml          # Secret-scan allowlist for pre-commit + CI
+├── .pre-commit-config.yaml # gitleaks + linting hooks
 ├── Dockerfile              # python:3.11-slim, healthcheck on port 8501
-├── docker-compose.yml      # streamlit service + alerts daemon
+├── docker-compose.yml      # streamlit + alerts + prometheus + grafana
 ├── run.sh                  # Local dev launcher (venv + streamlit)
 │
 ├── adapters/               # Pluggable adapters (implement provider protocols)
-│   ├── broker/             # Broker adapters (Alpaca, IBKR, Schwab, Tradier, CCXT)
-│   ├── market_data/        # Market data adapters (alpaca, yfinance, mock)
-│   ├── alert/              # Alert channel adapters
-│   ├── llm/                # LLM adapters
-│   └── tsdb/               # Time-series DB adapters
+│   ├── broker/             # Broker adapters (Alpaca, IBKR, Schwab, Paper)
+│   ├── market_data/        # Market data adapters (alpaca, yfinance, polygon, mock)
+│   ├── alert/              # Alert channel adapters (email, slack, no-op)
+│   ├── llm/                # LLM adapters (Anthropic, OpenAI, Ollama, mock)
+│   ├── sentiment/          # Sentiment adapters (VADER, StockTwits, mock)
+│   ├── tsdb/               # Time-series DB adapters (SQLite, DuckDB, TimescaleDB)
+│   ├── feature_store/      # Feature store adapters (memory, Redis)
+│   ├── execution_algo/     # Execution algorithm adapters (market, TWAP, VWAP)
+│   ├── macro/              # Macro data adapters (FRED, mock)
+│   ├── auth/               # Auth adapters (GitHub, Google)
+│   ├── model_registry/     # Model registry adapters (MLflow, mock)
+│   └── options_flow/       # Options flow adapters (Unusual Whales, ThetaData, mock)
 │
+├── agents/                 # AI/rule-based specialist trading agents
 ├── alerts/                 # Notification channels: Telegram, Email, Slack, Webhook
-├── analysis/               # Quant analytics: Greeks, risk metrics, regime detection
+├── analysis/               # Quant analytics: Greeks, risk metrics, regime, IC, drift
+├── audit/                  # Structured audit trail logger
+├── auth/                   # OAuth token management + RBAC session state
 ├── backtester/             # Event-driven backtester, walk-forward, Monte Carlo
 ├── broker/                 # Direct broker integrations + paper trading engine
-├── cron/                   # Scheduled jobs (monthly walk-forward runner)
-├── data/                   # Data fetching, caching, watchlist (SQLite-backed)
+├── bus/                    # Pub-sub event bus for inter-module communication
+├── cron/                   # Scheduled jobs (daily execution, monthly retrain, WF)
+├── data/                   # Data fetching, caching, feature engineering (SQLite-backed)
 ├── deploy/                 # supervisord configs and deployment helpers
+├── docs/                   # Decision records and plan-review audit logs
 ├── journal/                # Trading journal (entry/exit metadata, analytics)
+├── monitoring/             # Prometheus metrics exporter + sidecar
 ├── pages/                  # One Streamlit tab per file + shared sidebar
 ├── providers/              # Protocol definitions + factory functions (DI layer)
-├── risk/                   # VaR, CVaR, Kelly criterion, Markowitz optimization
-├── scheduler/              # APScheduler alert engine
+├── risk/                   # VaR, CVaR, Kelly, HRP, Markowitz, pre-trade guards
+├── scheduler/              # APScheduler alert + knowledge-health engine
 ├── screener/               # Equity screening by momentum / factor criteria
-├── strategies/             # Technical indicators and trading strategy logic
+├── scripts/                # CI helper scripts (coverage, silent-skip, e2e perf)
+├── strategies/             # Technical indicators, ML signals, execution logic
 ├── tests/                  # 39 test files, 76%+ coverage enforced in CI
 └── utils/                  # Logging helpers
 ```
@@ -54,20 +73,23 @@ quant-platform/
 
 | Layer | Library / Tool |
 |---|---|
-| UI | Streamlit 1.56.0 |
-| Data | pandas 3.0.2, numpy 2.4.4, yfinance 1.2.1 |
-| Charts | plotly 6.6.0 |
+| UI | Streamlit 1.57.0 |
+| Data | pandas 3.0.2, numpy 2.4.4, yfinance 1.3.0 |
+| Charts | plotly 6.7.0 |
 | Indicators | ta 0.11.0 |
+| ML | lightgbm 4.0+, scikit-learn 1.3+, scipy 1.11+, gensim 4.3+ |
 | Crypto | ccxt 4.0+ (100+ exchanges) |
 | Brokers | Alpaca, IBKR (IB Gateway), Schwab, Tradier |
 | Scheduling | APScheduler 3.11.2 |
-| Database | SQLite (WAL mode) via stdlib `sqlite3` |
+| Database | SQLite (WAL mode) via stdlib `sqlite3`, DuckDB 1.5.2 |
 | Logging | structlog 24.0+ |
+| Observability | Prometheus metrics, Grafana dashboards |
 | Linting | ruff |
-| Security | bandit, pip-audit |
-| Testing | pytest 9.0.3, pytest-cov |
+| Type checking | mypy (Phase-1: providers/, risk/, bus/, journal/) |
+| Security | bandit, pip-audit, gitleaks |
+| Testing | pytest 9.0.3, pytest-cov, pytest-xdist, Hypothesis, freezegun |
 | CI/CD | GitHub Actions |
-| Deploy | Docker + docker-compose |
+| Deploy | Docker + docker-compose, Kubernetes Helm charts |
 
 ---
 
@@ -79,10 +101,11 @@ quant-platform/
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env        # fill in API keys
-pip install pre-commit       # secret-scan + lint hooks (#249)
-pre-commit install           # one-time per clone
-bash run.sh                  # starts Streamlit on :8501
+pip install -r requirements-dev.txt   # mypy + stubs
+cp .env.example .env                  # fill in API keys
+pip install pre-commit                # secret-scan + lint hooks (#249)
+pre-commit install                    # one-time per clone
+bash run.sh                           # starts Streamlit on :8501
 ```
 
 The `pre-commit install` step wires `gitleaks` into every `git commit`
@@ -96,16 +119,19 @@ is rejected). False positives go in `.gitleaks.toml`.
 
 ```bash
 # Unit tests only (fast, no external services required)
-pytest tests/ -m "not integration"
+pytest tests/ -m "not integration and not e2e"
 
 # With coverage report
-pytest tests/ -m "not integration" --cov=. --cov-report=term-missing
+pytest tests/ -m "not integration and not e2e" --cov=. --cov-report=term-missing
+
+# E2E chain tests (SQLite + paper trader, no network)
+pytest tests/ -m "e2e"
 
 # Integration tests (require live credentials)
 pytest tests/ -m "integration"
 ```
 
-**CI enforces `--cov-fail-under=76`.** Keep coverage above this threshold when adding code.
+**CI enforces `--cov-fail-under=76` (branch coverage).** The excellent-test gate (#215) additionally requires ≥ 85% coverage on every source file a PR modifies.
 
 For a single-command CI-mirror run (ruff + pytest 76% + bandit HIGH + pip-audit) from inside Claude Code, invoke the `/pre-push` skill.
 
@@ -117,6 +143,14 @@ ruff check . --fix    # auto-fix where possible
 ```
 
 Config: `ruff.toml` — line-length 100, rules E/F/W/I, E501 ignored.
+
+### Type Checking
+
+```bash
+python -m mypy    # config-driven via setup.cfg
+```
+
+Phase-1 scope: `providers/`, `risk/`, `bus/`, `journal/` with `--strict-optional`. Catches `Optional[X]` passed where `X` is required at PR time.
 
 ### Security Scanning
 
@@ -130,7 +164,7 @@ Bandit fails CI only on HIGH severity findings. `PYSEC-2022-42969` is allowliste
 ### Docker
 
 ```bash
-docker-compose up          # streamlit (:8501) + alerts daemon
+docker-compose up            # streamlit (:8501) + alerts + prometheus + grafana
 docker-compose up streamlit  # UI only
 ```
 
@@ -140,11 +174,22 @@ docker-compose up streamlit  # UI only
 
 All pipelines live in `.github/workflows/`.
 
-| Workflow | Trigger | Steps |
+| Workflow | Trigger | Jobs |
 |---|---|---|
-| `ci.yml` | PR → main, push to main | lint → security → unit tests → integration tests → coverage comment on PR |
+| `ci.yml` | PR → main, push to main | lint → typecheck → security → test → e2e → merge-gate |
 | `build.yml` | push to main | full test suite → Docker build → validate compose |
 | `release.yml` | tag `v*.*.*` | tests → Docker push to GHCR → GitHub Release + changelog |
+
+**Job details for `ci.yml`:**
+
+| Job | What it does |
+|---|---|
+| `lint` | `ruff check .` |
+| `typecheck` | `mypy` on Phase-1 modules (`providers/`, `risk/`, `bus/`, `journal/`) |
+| `security` | gitleaks secret scan, bandit HIGH gate, pip-audit, SARIF upload |
+| `test` | Unit tests (`-m "not integration and not e2e"`), 76% branch-coverage floor, xdist parallel, excellent-test gate (85% per changed file) |
+| `e2e` | E2E chain tests (`-m "e2e"`), per-test ≤ 3 s, total ≤ 30 s, per-module 40% floor |
+| `merge-gate` | Single required check; fails if any upstream job did not succeed |
 
 **Never skip CI.** Fix lint/test failures rather than using `--no-verify` or bypass flags.
 
@@ -157,21 +202,28 @@ All pipelines live in `.github/workflows/`.
 The `providers/` directory defines `Protocol` classes and factory functions. Concrete implementations live in `adapters/`. Switch implementations with env vars — no code changes required.
 
 ```python
-# providers/market_data.py
 from providers.market_data import get_market_data
 
 provider = get_market_data()          # reads MARKET_DATA_PROVIDER env var
 bars = provider.get_bars("AAPL", "1Day", "2024-01-01", "2024-12-31")
 ```
 
-**Providers and their env var selectors:**
+**All providers and their env var selectors:**
 
 | Provider | Env Var | Options |
 |---|---|---|
-| Market data | `MARKET_DATA_PROVIDER` | `alpaca`, `yfinance` (default), `mock` |
+| Market data | `MARKET_DATA_PROVIDER` | `alpaca`, `yfinance` (default), `polygon`, `mock` |
 | Broker | `BROKER_PROVIDER` | `alpaca`, `ibkr`, `schwab`, `tradier`, `ccxt`, `paper` |
 | Alerts | `ALERT_PROVIDER` | `telegram`, `email`, `slack`, `webhook` |
-| LLM | `LLM_PROVIDER` | various |
+| LLM | `LLM_PROVIDER` | `anthropic`, `openai`, `ollama`, `mock` |
+| Sentiment | `SENTIMENT_PROVIDER` | `vader`, `stocktwits`, `mock` |
+| TSDB | `TSDB_PROVIDER` | `sqlite`, `duckdb`, `timescaledb` |
+| Feature store | `FEATURE_STORE_PROVIDER` | `memory`, `redis` |
+| Execution algo | `EXECUTION_ALGO_PROVIDER` | `market`, `twap`, `vwap` |
+| Macro data | `MACRO_PROVIDER` | `fred`, `mock` |
+| Auth | `AUTH_PROVIDER` | `github`, `google` |
+| Model registry | `MODEL_REGISTRY_PROVIDER` | `mlflow`, `mock` |
+| Options flow | `OPTIONS_FLOW_PROVIDER` | `unusual_whales`, `thetadata`, `mock` |
 
 Always code against the Protocol interface, never import a concrete adapter directly in business logic.
 
@@ -186,6 +238,19 @@ df = fetch_ohlcv("AAPL", "6mo")   # returns pandas DataFrame
 ```
 
 Cache TTLs: intraday 1h, short-term 4h, historical 24h. Data is stored as JSON in SQLite.
+
+### ML Feature Pipeline
+
+`data/features.py` builds the cross-sectional MultiIndex feature matrix consumed by all ML signals.
+
+```python
+from data.features import build_feature_matrix
+
+# Returns MultiIndex (date, ticker) DataFrame with lag returns, rolling stats, volume
+features = build_feature_matrix(tickers=["AAPL", "MSFT"], lookback=252)
+```
+
+For stationary features, use `data/frac_diff.py` (fixed-width FFD with ADF sweep) to fractionally differentiate price series without discarding memory.
 
 ### Database Access
 
@@ -204,6 +269,18 @@ conn.execute("SELECT * FROM watchlist")
 ```
 
 Use UPSERT patterns (`INSERT OR REPLACE`) for cache/state tables.
+
+### Event Bus
+
+Cross-module communication goes through `bus/event_bus.py` — never import pages from strategies or strategies from risk. Publish events; subscribe in the consumer.
+
+```python
+from bus.event_bus import EventBus
+from bus.events import SignalEvent
+
+bus = EventBus.get()
+bus.publish(SignalEvent(ticker="AAPL", score=0.72, regime="trending_bull"))
+```
 
 ### Logging
 
@@ -238,25 +315,135 @@ Shared sidebar state (ticker, period, overlays) lives in `pages/shared.py:render
 
 ## Key Module Reference
 
+### Data & Features
+
 | Module | Purpose | Key Entrypoint |
 |---|---|---|
 | `data/fetcher.py` | OHLCV data with caching | `fetch_ohlcv(ticker, period)` |
 | `data/db.py` | SQLite connection factory | `get_connection()`, `init_db()` |
 | `data/watchlist.py` | User ticker watchlists | `get_watchlist()`, `add_ticker()` |
-| `data/realtime.py` | Real-time price feed | `RealtimeFeed` class |
-| `strategies/indicators.py` | SMA, EMA, RSI, MACD, BB | Function per indicator |
-| `analysis/greeks.py` | Black-Scholes Greeks | `delta()`, `gamma()`, etc. |
-| `analysis/risk_metrics.py` | VaR, CVaR, Sharpe, Sortino | `var()`, `cvar()`, `sharpe()` |
+| `data/realtime.py` | Real-time price feed (WS + polling fallback) | `RealtimeFeed` class |
+| `data/features.py` | Cross-sectional MultiIndex feature matrix | `build_feature_matrix(tickers, lookback)` |
+| `data/frac_diff.py` | Fractional differentiation (FFD + ADF sweep) | `frac_diff_ffd(series, d)` |
+
+### Analysis & Quant
+
+| Module | Purpose | Key Entrypoint |
+|---|---|---|
+| `analysis/greeks.py` | Black-Scholes Greeks + portfolio aggregation | `delta()`, `gamma()`, etc. |
+| `analysis/risk_metrics.py` | Sharpe, Sortino, Calmar, max drawdown | `sharpe()`, `sortino()`, `max_drawdown()` |
 | `analysis/regime.py` | 4-state market regime classifier | `classify_regime(df)` |
-| `risk/portfolio_risk.py` | Kelly, Markowitz optimization | `kelly_fraction()`, `optimize()` |
-| `backtester/engine.py` | Event-driven backtester | `run_backtest(strategy, df)` → `BacktestResult` |
-| `backtester/walk_forward.py` | Walk-forward validation | `run_walk_forward(...)` |
-| `backtester/monte_carlo.py` | Bootstrap simulation | `simulate(df, n_paths)` |
+| `analysis/factor_ic.py` | Information Coefficient / ICIR evaluation | `compute_ic(predictions, returns)` |
+| `analysis/triple_barrier.py` | López de Prado triple-barrier labeling | `get_labels(prices, events, pt_sl)` |
+| `analysis/live_ic.py` | Real-time IC tracking from executed predictions | `LiveICTracker` class |
+| `analysis/drift.py` | Covariate-shift detector (PSI) | `compute_psi(reference, current)` |
+| `analysis/deflated_sharpe.py` | Probability of Backtest Overfitting | `deflated_sharpe_ratio(...)` |
+
+### Strategies & Signals
+
+| Module | Purpose | Key Entrypoint |
+|---|---|---|
+| `strategies/indicators.py` | SMA, EMA, RSI, MACD, BB, ATR | Function per indicator |
+| `strategies/ml_signal.py` | LightGBM baseline + regime-conditioned models | `MLSignal.fit()`, `.predict()` |
+| `strategies/linear_signal.py` | Ridge regression alternative | `LinearSignal.fit()`, `.predict()` |
+| `strategies/ensemble_signal.py` | Weighted blend of heterogeneous signals | `EnsembleSignal.predict()` |
+| `strategies/meta_label.py` | RandomForest confidence wrapper (AFML Ch 3) | `MetaLabeler.fit()`, `.predict_proba()` |
+| `strategies/ml_execution.py` | Kelly × regime × score position sizing | `compute_position_size(signal, regime, kelly)` |
+| `strategies/ml_tuning.py` | Optuna Bayesian HPO with purged CV | `tune_hyperparams(signal_cls, features, labels)` |
+| `strategies/momentum.py` | Cross-sectional momentum scoring | `momentum_score(df)` |
+| `strategies/pairs.py` | Cointegration-based pairs trading | `find_pairs(universe)` |
+| `strategies/sentiment_signal.py` | NLP-scored headline signals | `SentimentSignal.predict()` |
+| `strategies/rebalancer.py` | Markowitz-based portfolio rebalancing | `rebalance(positions, target_weights)` |
+
+### Risk & Portfolio
+
+| Module | Purpose | Key Entrypoint |
+|---|---|---|
+| `risk/var.py` | VaR/CVaR (historical, parametric, filtered) | `var()`, `cvar()` |
+| `risk/kelly.py` | Half-Kelly position sizing (capped at 25%) | `kelly_fraction(win_rate, payoff_ratio)` |
+| `risk/markowitz.py` | Efficient frontier optimization | `optimize(returns, target="max_sharpe")` |
+| `risk/hrp.py` | Hierarchical Risk Parity allocation | `hrp_allocate(returns)` |
+| `risk/correlation.py` | Correlation matrix + concentration detection | `correlation_matrix(returns)` |
+| `risk/pretrade_guard.py` | Pre-trade risk gates + killswitch | `PreTradeGuard.check(order, account)` |
+| `risk/options_sizing.py` | Options position sizing (Greeks-based) | `size_options_position(greeks, account)` |
+
+### Backtesting
+
+| Module | Purpose | Key Entrypoint |
+|---|---|---|
+| `backtester/engine.py` | Vectorized backtester | `run_signal_backtest(signals, prices)` → `BacktestResult` |
+| `backtester/walk_forward.py` | Purged walk-forward CV with embargo gap | `run_walk_forward(signal_cls, features, labels)` |
+| `backtester/monte_carlo.py` | Bootstrap + synthetic path stress testing | `simulate(df, n_paths)` |
+| `backtester/combinatorial_cv.py` | Combinatorial parameter tuning validation | `combinatorial_cv(...)` |
+
+### Agents
+
+| Module | Purpose | Key Entrypoint |
+|---|---|---|
+| `agents/meta_agent.py` | Ensemble vote over all specialized agents | `MetaAgent.run(ticker)` → `AgentSignal` |
+| `agents/regime_agent.py` | Regime classifier + strategy router | `RegimeAgent.run(ticker)` |
+| `agents/risk_agent.py` | Risk constraint evaluator | `RiskAgent.run(account)` |
+| `agents/knowledge_agent.py` | Model staleness / IC / drift verdict | `KnowledgeAgent.run(model_id)` → `fresh\|monitor\|retrain` |
+| `agents/sentiment_agent.py` | Sentiment-based trading signal | `SentimentAgent.run(ticker)` |
+| `agents/screener_agent.py` | Equity screening by momentum/factors | `ScreenerAgent.run(universe)` |
+| `agents/execution_agent.py` | Order execution optimizer | `ExecutionAgent.run(order)` |
+| `agents/knowledge_registry.py` | Model zoo registry for multi-family auditing | `KnowledgeRegistry` class |
+
+### Infrastructure
+
+| Module | Purpose | Key Entrypoint |
+|---|---|---|
 | `broker/paper_trader.py` | Offline paper trading | `buy()`, `sell()`, `get_positions()` |
-| `scheduler/alerts.py` | APScheduler alert engine | `start_scheduler()` |
-| `screener/` | Factor/momentum stock screening | `screen(criteria)` |
+| `scheduler/alerts.py` | APScheduler alert + knowledge-health engine | `start_scheduler()` |
 | `journal/trading_journal.py` | Trade recording & analytics | `log_trade()`, `get_trades()` |
+| `bus/event_bus.py` | Pub-sub event dispatcher | `EventBus.get()`, `.publish()`, `.subscribe()` |
+| `audit/logger.py` | Structured audit trail | `audit_log(action, context)` |
+| `monitoring/metrics.py` | Prometheus metrics exporter | `record_signal()`, `record_trade()` |
 | `providers/market_data.py` | Market data DI factory | `get_market_data()` |
+| `screener/screener.py` | Factor/momentum stock screening | `screen(criteria)` |
+
+---
+
+## Agents Architecture
+
+The `agents/` package implements a decision-agent layer on top of the quant modules. Each specialist agent follows the `AgentBase` protocol (`agents/base.py`) and returns a typed `AgentSignal`.
+
+```python
+from agents.meta_agent import MetaAgent
+
+signal = MetaAgent().run("AAPL")
+# signal.verdict: "buy" | "sell" | "hold"
+# signal.confidence: float 0–1
+# signal.regime: "trending_bull" | "trending_bear" | "mean_revert" | "high_vol"
+```
+
+The **knowledge agent** (`agents/knowledge_agent.py`) audits model health by combining live IC, PSI drift score, and days-since-retrain into a verdict: `fresh` | `monitor` | `retrain`. The **knowledge registry** (`agents/knowledge_registry.py`) tracks all deployed model families and is consumed by `pages/model_health.py`.
+
+---
+
+## ML Alpha Pipeline
+
+The full ML signal lifecycle:
+
+```
+data/features.py          →  feature matrix (MultiIndex date×ticker)
+analysis/factor_ic.py     →  IC/ICIR evaluation per feature
+analysis/triple_barrier.py →  target labels
+strategies/ml_signal.py   →  LightGBM model (regime-conditioned)
+strategies/ml_tuning.py   →  Optuna HPO (purged CV, no leakage)
+backtester/walk_forward.py →  out-of-sample validation
+strategies/ml_execution.py →  position sizing (Kelly × regime × |score|)
+cron/monthly_ml_retrain.py →  scheduled retraining (1st of month)
+cron/daily_ml_execute.py  →  daily scoring + order submission (16:05 ET)
+```
+
+Use the `/ml-experiment` skill to run this pipeline end-to-end for a new signal. Use `/run-experiment` to run a single phase (ic, tune, or wf) via the experiment-tracker subagent.
+
+**Key invariants:**
+- Always use purged walk-forward CV (`backtester/walk_forward.py`) — never `train_test_split`
+- Labels come from `analysis/triple_barrier.py` only
+- Position sizing goes through `strategies/ml_execution.py` — never size directly from raw scores
+- Model staleness is gated by `agents/knowledge_agent.py` before live execution
 
 ---
 
@@ -285,6 +472,7 @@ Shared sidebar state (ticker, period, overlays) lives in `pages/shared.py:render
 - Use type hints on all public function signatures
 - Use `Protocol` for interfaces (not ABC)
 - Prefer `list[str]` over `List[str]` (Python 3.9+ style)
+- mypy is enforced in CI for Phase-1 modules (`providers/`, `risk/`, `bus/`, `journal/`)
 
 ### Security
 - **Never hardcode secrets** — all credentials loaded from `.env` via `os.getenv()`
@@ -303,11 +491,12 @@ Copy `.env.example` to `.env` and populate the relevant keys. Key variables:
 | `APP_ENV` | `development` | `development` or `production` |
 | `LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
 | `LOG_FORMAT` | `console` | `console` or `json` |
-| `MARKET_DATA_PROVIDER` | `yfinance` | `alpaca`, `yfinance`, `mock` |
+| `MARKET_DATA_PROVIDER` | `yfinance` | `alpaca`, `yfinance`, `polygon`, `mock` |
 | `ALPACA_API_KEY` | — | Alpaca API key |
 | `ALPACA_SECRET_KEY` | — | Alpaca secret |
 | `ALPACA_BASE_URL` | paper URL | Override for live trading |
 | `ALPACA_PAPER` | `true` | Set `false` only for live trading |
+| `POLYGON_API_KEY` | — | Polygon.io API key (historical backfill) |
 | `CCXT_EXCHANGE` | — | Exchange ID (e.g., `binance`) |
 | `TELEGRAM_BOT_TOKEN` | — | Telegram alert bot |
 | `TELEGRAM_CHAT_ID` | — | Target Telegram chat |
@@ -315,6 +504,13 @@ Copy `.env.example` to `.env` and populate the relevant keys. Key variables:
 | `PAPER_STARTING_CASH` | `100000` | Paper trading starting balance |
 | `WF_TICKERS` | — | Comma-separated tickers for walk-forward cron |
 | `MAX_DRAWDOWN_PCT` | — | Alert threshold for drawdown |
+| `MAX_GROSS_EXPOSURE` | — | Pre-trade guard: max gross notional exposure |
+| `MAX_DAILY_LOSS_PCT` | — | Pre-trade guard: max daily loss % before killswitch |
+| `KILLSWITCH_FILE` | — | Path to killswitch sentinel file |
+| `MLFLOW_URI` | — | MLflow tracking server URI |
+| `DUCKDB_PATH` | — | Path for DuckDB time-series cache |
+| `KNOWLEDGE_AUTO_RETRAIN` | `false` | Auto-trigger retrain on `retrain` verdict |
+| `LIVE_IC_BACKFILL_CRON` | — | Cron expression for live-IC backfill job |
 
 ---
 
@@ -323,10 +519,11 @@ Copy `.env.example` to `.env` and populate the relevant keys. Key variables:
 - Test files: `tests/test_<module_name>.py`
 - One test file per source module
 - Mock all external APIs (yfinance, broker APIs) — tests must not require network
-- Use `@pytest.mark.integration` for tests that need live credentials; these are excluded from CI unit test run
+- Use `@pytest.mark.integration` for tests that need live credentials (excluded from CI unit run)
+- Use `@pytest.mark.e2e` for full-chain tests (run in the separate `e2e` CI job)
 - `conftest.py` sets `OPENBLAS_NUM_THREADS=1` to prevent BLAS thread contention in CI
 - Fixtures for DB setup should use in-memory SQLite (`:memory:`) or temp files
-- Aim to keep unit tests fast (< 1s each)
+- Aim to keep unit tests fast (< 1s each); e2e tests have a hard 3 s per-test budget
 
 ### Bug-regression discipline (#230)
 
@@ -363,15 +560,15 @@ where possible.
 ### Synthetic-data factories (#239)
 
 [`tests/factories.py`](tests/factories.py) is the **single source
-of truth** for synthetic OHLCV / returns / prices / feature
-matrices. New tests pull the helper that fits:
+of truth** for synthetic test data. New tests pull the helper that fits:
 
 ```python
-from tests.factories import make_ohlcv, make_returns, make_prices
+from tests.factories import make_ohlcv, make_returns, make_prices, make_feature_matrix
 
-df = make_ohlcv(n=60, seed=7)         # canonical capitalised-column OHLCV
-r  = make_returns(n=252, sigma=0.02)  # daily-return series
-p  = make_prices(n=200, last=110.0)   # constant-price for SMA tests
+df  = make_ohlcv(n=60, seed=7)              # OHLCV DataFrame (capitalised columns)
+r   = make_returns(n=252, sigma=0.02)       # daily-return series
+p   = make_prices(n=200, last=110.0)        # constant-price for SMA tests
+fmx = make_feature_matrix(n=100, tickers=["AAPL", "MSFT"], seed=42)  # MultiIndex features
 ```
 
 Each factory is fully deterministic given its `seed` argument so
@@ -409,6 +606,17 @@ pytest tests/test_backtester.py::test_sma_crossover -v
 1. Add indicator function to `strategies/indicators.py` (or new file for complex strategies)
 2. Wire into `backtester/engine.py` if it needs backtesting support
 3. Add tests in `tests/test_indicators.py` or a new test file
+
+### New ML Signal
+
+1. Add features to `data/features.py`
+2. Measure IC with `analysis/factor_ic.py`
+3. Implement signal class in `strategies/` following `MLSignal` interface
+4. Tune with `strategies/ml_tuning.py` (Optuna + purged CV)
+5. Validate with `backtester/walk_forward.py`
+6. Wire sizing through `strategies/ml_execution.py`
+7. Register model in `agents/knowledge_registry.py`
+8. Use `/ml-experiment` or `/run-experiment` skills for guided execution
 
 ### New Alert Channel
 
@@ -492,10 +700,11 @@ The `release.yml` workflow automatically:
 | `README.md` | Quick start, feature list, release process |
 | `PLAN.md` | Architecture overview, build roadmap, security checklist |
 | `TRADING_PHILOSOPHY.md` | Trading indicators, risk management, decision framework, anti-patterns |
-| `IMPLEMENTATION_SUMMARY.md` | Feature progress tracker (P1–P4), coverage status |
+| `IMPLEMENTATION_SUMMARY.md` | Feature progress tracker (P1–P5), coverage status |
 | `MAINTENANCE_AND_BROKERS.md` | Broker landscape, integration guide, maintenance playbook |
-| `cron/README.md` | Monthly walk-forward cron setup |
-| `deploy/README.md` | Deployment notes |
+| `ML_BOOK_MAP.md` | AFML/ML4T chapter cross-reference with implementation map |
+| `cron/README.md` | Monthly walk-forward and daily execution cron setup |
+| `deploy/README.md` | Deployment notes (Docker, Kubernetes Helm, supervisord) |
 
 ---
 
@@ -509,3 +718,8 @@ The `release.yml` workflow automatically:
 - **Do not** store sensitive data in `st.session_state` across sessions
 - **Do not** add blocking I/O in Streamlit render functions without spinner context (`st.spinner`)
 - **Do not** skip tests or lower the coverage threshold — fix the underlying issue instead
+- **Do not** use `train_test_split` for ML model validation — use purged walk-forward CV (`backtester/walk_forward.py`)
+- **Do not** size positions directly from raw ML scores — route through `strategies/ml_execution.py`
+- **Do not** publish live orders without passing through `risk/pretrade_guard.py`
+- **Do not** cross-import between `pages/`, `strategies/`, and `risk/` — use `bus/event_bus.py` for decoupled communication
+- **Do not** call agent methods from Streamlit render functions synchronously on large universes — use `st.spinner` and cache results in `st.session_state`
