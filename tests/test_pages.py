@@ -116,8 +116,8 @@ sys.modules["streamlit"]          = _ST
 sys.modules["streamlit_autorefresh"] = MagicMock()
 
 # Now it's safe to import page modules
-from data.db import init_db
-from scheduler.alerts import init_alerts_table
+from data.db import init_db  # noqa: E402
+from scheduler.alerts import init_alerts_table  # noqa: E402
 
 init_db()
 init_alerts_table()
