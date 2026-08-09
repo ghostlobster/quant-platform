@@ -63,28 +63,64 @@ if not is_authenticated():
 
 shared.render_sidebar()
 
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10 = st.tabs([
-    "📈 Chart", "🔬 Backtest", "🔍 Screener", "💼 Portfolio",
-    "🔔 Alerts", "📓 Journal", "📐 Efficient Frontier", "🧮 Greeks",
-    "🤖 ML Signals", "🩺 Model Health",
-])
-with tab1:
-    chart.render()
-with tab2:
-    backtest.render()
-with tab3:
-    screener.render()
-with tab4:
-    portfolio.render()
-with tab5:
-    alerts.render()
-with tab6:
-    journal_tab.render()
-with tab7:
-    efficient_frontier.render()
-with tab8:
-    greeks.render()
-with tab9:
-    ml_signals.render()
-with tab10:
-    model_health.render()
+domain_choice = st.session_state.get("_nav_domain", "🌐 All Features")
+
+if domain_choice == "📊 Market Research":
+    tab1, tab2 = st.tabs(["📈 Chart", "🔍 Screener"])
+    with tab1:
+        chart.render()
+    with tab2:
+        screener.render()
+
+elif domain_choice == "🤖 Quantitative ML":
+    tab1, tab2, tab3 = st.tabs(["🤖 ML Signals", "🧮 Greeks", "📐 Efficient Frontier"])
+    with tab1:
+        ml_signals.render()
+    with tab2:
+        greeks.render()
+    with tab3:
+        efficient_frontier.render()
+
+elif domain_choice == "🔬 Backtest & Model":
+    tab1, tab2 = st.tabs(["🔬 Backtest", "🩺 Model Health"])
+    with tab1:
+        backtest.render()
+    with tab2:
+        model_health.render()
+
+elif domain_choice == "💼 Execution & Portfolio":
+    tab1, tab2, tab3 = st.tabs(["💼 Portfolio", "📓 Journal", "🔔 Alerts"])
+    with tab1:
+        portfolio.render()
+    with tab2:
+        journal_tab.render()
+    with tab3:
+        alerts.render()
+
+else:
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10 = st.tabs([
+        "📈 Chart", "🔬 Backtest", "🔍 Screener", "💼 Portfolio",
+        "🔔 Alerts", "📓 Journal", "📐 Efficient Frontier", "🧮 Greeks",
+        "🤖 ML Signals", "🩺 Model Health",
+    ])
+    with tab1:
+        chart.render()
+    with tab2:
+        backtest.render()
+    with tab3:
+        screener.render()
+    with tab4:
+        portfolio.render()
+    with tab5:
+        alerts.render()
+    with tab6:
+        journal_tab.render()
+    with tab7:
+        efficient_frontier.render()
+    with tab8:
+        greeks.render()
+    with tab9:
+        ml_signals.render()
+    with tab10:
+        model_health.render()
+

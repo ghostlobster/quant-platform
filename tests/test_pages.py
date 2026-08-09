@@ -116,6 +116,12 @@ sys.modules["streamlit"]          = _ST
 sys.modules["streamlit_autorefresh"] = MagicMock()
 
 # Now it's safe to import page modules
+from data.db import init_db
+from scheduler.alerts import init_alerts_table
+
+init_db()
+init_alerts_table()
+
 import pages.alerts as pg_alerts  # noqa: E402
 import pages.backtest as pg_backtest  # noqa: E402
 import pages.efficient_frontier as pg_ef  # noqa: E402
@@ -129,6 +135,8 @@ import pages.shared as pg_shared  # noqa: E402
 
 def _reset_session(**overrides):
     """Reset session state to safe defaults between tests."""
+    sys.modules["streamlit"] = _ST
+    sys.modules["streamlit_autorefresh"] = MagicMock()
     _ST.session_state.clear()
     _ST.session_state.update(
         {
@@ -200,6 +208,7 @@ class TestPagesShared:
     def test_render_sidebar_returns_dict(self):
         _reset_session()
         with patch("pages.shared.get_watchlist", return_value=["AAPL", "MSFT"]), \
+             patch("data.watchlist.get_watchlist", return_value=["AAPL", "MSFT"]), \
              patch("pages.shared.add_ticker"), \
              patch("pages.shared.remove_ticker"):
             result = pg_shared.render_sidebar()
@@ -211,6 +220,7 @@ class TestPagesShared:
         _reset_session()
         watchlist = ["AAPL", "MSFT", "NVDA"]
         with patch("pages.shared.get_watchlist", return_value=watchlist), \
+             patch("data.watchlist.get_watchlist", return_value=watchlist), \
              patch("pages.shared.add_ticker"), \
              patch("pages.shared.remove_ticker"):
             result = pg_shared.render_sidebar()
@@ -251,6 +261,7 @@ class TestPagesBacktest:
         )
 
         with patch("pages.backtest.fetch_ohlcv", return_value=_ohlcv()), \
+             patch("data.fetcher.fetch_ohlcv", return_value=_ohlcv()), \
              patch("pages.backtest.run_backtest", return_value=fake_result), \
              patch("pages.backtest.build_equity_chart", return_value=MagicMock()), \
              patch("pages.backtest.build_trade_log_df", return_value=pd.DataFrame()):

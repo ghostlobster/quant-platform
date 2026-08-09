@@ -54,8 +54,9 @@ class BacktestResult:
     sortino_ratio: float = 0.0
     calmar_ratio: float = 0.0
 
-    # ── ATR stop-loss counter (R-06) ──────────────────────────────────────────
+    # ── ATR stop-loss counter & slippage (R-06) ──────────────────────────────
     stop_losses_triggered: int = 0
+    slippage_bps: float = 5.0
 
     # ── Detail ────────────────────────────────────────────────────────────────
     trades: list[Trade] = field(default_factory=list)
@@ -116,105 +117,106 @@ def _run(
     strategy: StrategyName,
     atr: pd.Series | None = None,
     atr_multiplier: float = 2.0,
+    slippage_bps: float = 5.0,
 ) -> tuple[list[Trade], pd.DataFrame, int]:
     """
-    Simulate trades from a signal series.
+    Simulate trades from a signal series with realistic execution semantics.
 
-    For SMA crossover signals are continuous (+1 = long, -1 = flat).
-    For RSI, signals are trigger-based (+1 = enter long, -1 = exit long).
-
-    If *atr* is provided, an ATR-based trailing stop-loss is applied: exit if
-    price falls below entry_price - atr_multiplier * atr_at_entry.
+    Execution Realism:
+    - Signals generated on bar i fill at bar i+1 Open price (no same-bar lookahead).
+    - Slippage (default 5 bps = 0.05%) increases entry prices and decreases exit prices.
 
     Returns (trades, equity_df, stop_losses_triggered).
     """
     close = df["Close"]
+    open_prices = df["Open"] if "Open" in df.columns else close
     n = len(close)
     trades: list[Trade] = []
     stop_losses_triggered = 0
 
     in_position = False
+    pending_entry = False
+    pending_exit = False
     entry_price = 0.0
     stop_price = 0.0
     entry_date: pd.Timestamp = close.index[0]
     equity = 1.0
     equity_curve = []
+    slip_mult = slippage_bps / 10000.0
 
     for i in range(n):
         date = close.index[i]
-        price = float(close.iloc[i])
+        c_price = float(close.iloc[i])
+        o_price = float(open_prices.iloc[i])
         sig = int(signals.iloc[i])
 
-        # ATR stop-loss check — exit if in position and price breaches stop
-        if in_position and atr is not None and price <= stop_price:
-            ret = (price - entry_price) / entry_price
+        # Execute pending orders at bar i Open (realistic execution from previous bar signal)
+        if pending_entry and not in_position:
+            in_position = True
+            pending_entry = False
+            entry_price = o_price * (1.0 + slip_mult)
+            entry_date = date
+            atr_val = float(atr.iloc[i]) if atr is not None and not np.isnan(atr.iloc[i]) else 0.0
+            stop_price = entry_price - atr_multiplier * atr_val
+
+        elif pending_exit and in_position:
+            exit_price = o_price * (1.0 - slip_mult)
+            ret = (exit_price - entry_price) / entry_price
             equity *= (1 + ret)
             trades.append(Trade(
                 entry_date=entry_date,
                 exit_date=date,
                 entry_price=entry_price,
-                exit_price=price,
+                exit_price=exit_price,
+                ret_pct=ret * 100,
+            ))
+            in_position = False
+            pending_exit = False
+
+        # Intra-bar ATR stop-loss check — exit if price breaches stop
+        if in_position and atr is not None and c_price <= stop_price:
+            exit_price = c_price * (1.0 - slip_mult)
+            ret = (exit_price - entry_price) / entry_price
+            equity *= (1 + ret)
+            trades.append(Trade(
+                entry_date=entry_date,
+                exit_date=date,
+                entry_price=entry_price,
+                exit_price=exit_price,
                 ret_pct=ret * 100,
             ))
             in_position = False
             stop_losses_triggered += 1
 
+        # Evaluate signal on current bar close for execution on next bar Open
         if strategy == "sma_crossover":
-            # Continuous: enter when sig turns +1, exit when it turns -1/0
-            if not in_position and sig == 1:
-                in_position = True
-                entry_price = price
-                entry_date = date
-                atr_val = float(atr.iloc[i]) if atr is not None and not np.isnan(atr.iloc[i]) else 0.0
-                stop_price = entry_price - atr_multiplier * atr_val
-            elif in_position and sig != 1:
-                ret = (price - entry_price) / entry_price
-                equity *= (1 + ret)
-                trades.append(Trade(
-                    entry_date=entry_date,
-                    exit_date=date,
-                    entry_price=entry_price,
-                    exit_price=price,
-                    ret_pct=ret * 100,
-                ))
-                in_position = False
-
-        else:  # rsi_mean_revert — trigger-based
-            if not in_position and sig == 1:
-                in_position = True
-                entry_price = price
-                entry_date = date
-                atr_val = float(atr.iloc[i]) if atr is not None and not np.isnan(atr.iloc[i]) else 0.0
-                stop_price = entry_price - atr_multiplier * atr_val
-            elif in_position and sig == -1:
-                ret = (price - entry_price) / entry_price
-                equity *= (1 + ret)
-                trades.append(Trade(
-                    entry_date=entry_date,
-                    exit_date=date,
-                    entry_price=entry_price,
-                    exit_price=price,
-                    ret_pct=ret * 100,
-                ))
-                in_position = False
+            if not in_position and not pending_entry and sig == 1:
+                pending_entry = True
+            elif in_position and not pending_exit and sig != 1:
+                pending_exit = True
+        else:  # rsi_mean_revert or custom signal
+            if not in_position and not pending_entry and sig == 1:
+                pending_entry = True
+            elif in_position and not pending_exit and sig == -1:
+                pending_exit = True
 
         # Mark-to-market equity for the curve
         if in_position:
-            mtm = equity * (price / entry_price)
+            mtm = equity * (c_price / entry_price)
         else:
             mtm = equity
         equity_curve.append({"Date": date, "Equity": mtm})
 
     # Close any open position at the last bar
     if in_position:
-        price = float(close.iloc[-1])
-        ret = (price - entry_price) / entry_price
+        exit_price = float(close.iloc[-1]) * (1.0 - slip_mult)
+        ret = (exit_price - entry_price) / entry_price
         equity *= (1 + ret)
         trades.append(Trade(
             entry_date=entry_date,
             exit_date=close.index[-1],
             entry_price=entry_price,
-            exit_price=price,
+            exit_price=exit_price,
             ret_pct=ret * 100,
         ))
         equity_curve[-1]["Equity"] = equity

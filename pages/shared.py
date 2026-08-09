@@ -90,6 +90,31 @@ def render_sidebar() -> dict:
 
     st.sidebar.divider()
 
+    # Inject custom styling if available
+    try:
+        from pathlib import Path
+        css_path = Path(__file__).resolve().parent.parent / "assets" / "style.css"
+        if css_path.exists():
+            st.markdown(f"<style>{css_path.read_text(encoding='utf-8')}</style>", unsafe_allow_html=True)
+    except Exception:
+        pass
+
+    # ── Section: Domain Navigation ────────────────────────────────────────────
+    st.sidebar.markdown("### 🧭 Navigation Domain")
+    st.sidebar.radio(
+        "Domain View",
+        [
+            "🌐 All Features",
+            "📊 Market Research",
+            "🤖 Quantitative ML",
+            "🔬 Backtest & Model",
+            "💼 Execution & Portfolio",
+        ],
+        key="_nav_domain",
+    )
+
+    st.sidebar.divider()
+
     # ── Section: Chart Controls ───────────────────────────────────────────────
     st.sidebar.markdown("### 📊 Chart Controls")
 
@@ -167,12 +192,6 @@ def render_sidebar() -> dict:
 
     st.sidebar.divider()
     st.sidebar.caption("© Quant Platform · All 10 steps complete ✓")
-
-    st.sidebar.markdown("---")
-    st.sidebar.subheader("⚡ Auto-refresh")
-    refresh_interval = st.sidebar.selectbox("Interval", [0, 60, 300, 900, 1800], format_func=lambda x: "Off" if x == 0 else f"{x//60} min")
-    if refresh_interval > 0:
-        st_autorefresh(interval=refresh_interval * 1000, key="autorefresh")
 
     # ── Header ────────────────────────────────────────────────────────────────
     _now = datetime.now()
