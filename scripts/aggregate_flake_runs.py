@@ -150,7 +150,7 @@ def main(argv: list[str] | None = None) -> int:
     print(report)
 
     out_path = Path("flake-report.md")
-    out_path.write_text(report)
+    out_path.write_text(report, encoding="utf-8")
     print(f"\nReport written to {out_path.resolve()}", file=sys.stderr)
 
     # Exit 0 always — flake reporting is advisory, not a failure

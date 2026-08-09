@@ -121,7 +121,7 @@ def test_rotate_compresses_old_jsonl(audit_dir):
     old_date = (today - timedelta(days=10)).isoformat()
     old_path = audit_dir / f"{old_date}.jsonl"
     old_path.parent.mkdir(parents=True, exist_ok=True)
-    old_path.write_text("{\"x\":1}\n", encoding="utf-8")
+    old_path.write_text("{\"x\":1}\n", encoding="utf-8", newline="\n")
 
     summary = audit.rotate(max_age_days=90, compress_after_days=7)
     assert summary["compressed"] == 1
