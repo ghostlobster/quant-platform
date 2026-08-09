@@ -1,0 +1,59 @@
+/* Quant Platform — Custom Institutional Dark Theme CSS */
+
+:root {
+    --bg-primary: #0B0F17;
+    --bg-card: #1E293B;
+    --accent-blue: #3B82F6;
+    --bullish-green: #10B981;
+    --bearish-red: #EF4444;
+    --text-primary: #F8FAFC;
+    --text-secondary: #94A3B8;
+}
+
+/* Metric card styling */
+div[data-testid="stMetric"] {
+    background-color: var(--bg-card);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    padding: 12px 16px;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2);
+}
+
+div[data-testid="stMetricLabel"] {
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    font-weight: 500;
+}
+
+div[data-testid="stMetricValue"] {
+    color: var(--text-primary);
+    font-size: 1.4rem;
+    font-weight: 700;
+}
+
+/* Custom badge styling */
+.metric-badge-bullish {
+    color: var(--bullish-green);
+    background: rgba(16, 185, 129, 0.1);
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.metric-badge-bearish {
+    color: var(--bearish-red);
+    background: rgba(239, 68, 68, 0.1);
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+/* Tab bar container styling */
+button[data-baseweb="tab"] {
+    font-size: 0.95rem;
+    font-weight: 600;
+    padding-left: 14px;
+    padding-right: 14px;
+}

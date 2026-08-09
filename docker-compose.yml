@@ -19,7 +19,7 @@ services:
 
   alerts:
     build: .
-    command: python alerts/engine.py
+    command: python scheduler/alerts.py
     volumes:
       - .:/app
     env_file: .env
@@ -52,7 +52,7 @@ services:
   grafana:
     image: grafana/grafana:latest
     ports:
-      - "3000:3000"
+      - "3001:3000"
     environment:
       GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_PASSWORD:-admin}"
       GF_PATHS_PROVISIONING: /etc/grafana/provisioning
