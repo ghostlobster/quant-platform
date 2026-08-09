@@ -23,7 +23,7 @@ MarkupSafe==3.0.3
 mdurl==0.1.2
 multitasking==0.0.13
 narwhals==2.24.0
-numpy==2.5.1
+numpy==2.4.6
 packaging==26.3
 pandas==3.0.5
 peewee==4.3.0
