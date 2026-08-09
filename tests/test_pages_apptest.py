@@ -118,7 +118,9 @@ def _journal_app() -> None:
     import os as _os
     import sys as _sys
 
-    _sys.path.insert(0, "/home/user/quant-platform")
+    _cwd = _os.getcwd()
+    if _cwd not in _sys.path:
+        _sys.path.insert(0, _cwd)
     # JOURNAL_DB_PATH is propagated via os.environ, which AppTest preserves.
     _os.environ.setdefault("JOURNAL_DB_PATH", "/tmp/at_journal.db")
     from pages.journal_tab import render
@@ -168,7 +170,9 @@ def _chart_app() -> None:
     import os as _os
     import sys as _sys
 
-    _sys.path.insert(0, "/home/user/quant-platform")
+    _cwd = _os.getcwd()
+    if _cwd not in _sys.path:
+        _sys.path.insert(0, _cwd)
     _os.environ.setdefault("DATA_DB_PATH", "/tmp/at_chart_quant.db")
 
     # Mock at the network boundary: regime fetch + OHLCV fetcher.
@@ -223,12 +227,13 @@ def _chart_app() -> None:
     # even when ``ta`` isn't installed in the dev environment.
     fake_with_indicators = fake_df.assign(
         RSI_14=50.0, MACD_line=0.0, MACD_signal=0.0, MACD_hist=0.0,
-        BB_upper=close + 2.0, BB_middle=close, BB_lower=close - 2.0,
-        EMA_20=close, Volume_SMA=fake_df["Volume"].mean(),
+        BB_upper=close + 2.0, BB_middle=close, BB_lower=close - 2.0, BB_mid=close,
+        EMA_20=close, EMA_50=close, Volume_SMA=fake_df["Volume"].mean(), Vol_SMA_20=fake_df["Volume"].mean(),
     )
-    fake_signals = fake_df.assign(
-        signal=0, rsi_signal=0, macd_signal=0, bb_signal=0,
-    )
+    fake_signals = [
+        {"indicator": "RSI", "signal": "Neutral", "detail": "RSI at 50", "bullish": None, "icon": "⚪"},
+        {"indicator": "MACD", "signal": "Bullish", "detail": "MACD above signal", "bullish": True, "icon": "🟢"},
+    ]
     # Patch in two layers so the chart page is hermetic even when the
     # optional ``ta`` package isn't installed, plus replace the
     # ``@st.cache_data``-decorated watchlist snapshot with a plain
@@ -238,6 +243,7 @@ def _chart_app() -> None:
          _patch("strategies.indicators.generate_signals", return_value=fake_signals), \
          _patch("pages.chart.add_all", return_value=fake_with_indicators), \
          _patch("pages.chart.generate_signals", return_value=fake_signals), \
+         _patch("streamlit.cache_data", lambda *a, **k: (lambda fn: fn)), \
          _patch("pages.chart.get_watchlist", return_value=[]), \
          _patch("data.fetcher.fetch_ohlcv", return_value=fake_df), \
          _patch("data.fetcher.fetch_latest_price", return_value=fake_latest_price), \

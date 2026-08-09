@@ -182,9 +182,13 @@ def get_journal(
         params.append(start_date)
     if end_date:
         # Extend end_date to include the full day
-        end_val = end_date if len(end_date) > 10 else end_date + "T23:59:59"
-        conditions.append("entry_time <= ?")
-        params.append(end_val)
+        if len(end_date) <= 10:
+            next_day = (pd.to_datetime(end_date) + pd.Timedelta(days=2)).strftime("%Y-%m-%d")
+            conditions.append("entry_time < ?")
+            params.append(next_day)
+        else:
+            conditions.append("entry_time <= ?")
+            params.append(end_date)
     if ticker:
         conditions.append("ticker = ?")
         params.append(ticker.upper().strip())

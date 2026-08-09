@@ -160,7 +160,7 @@ def test_main_writes_report_md(tmp_path: Path, monkeypatch, capsys) -> None:
     monkeypatch.chdir(tmp_path)
     rc = main([str(a), str(b)])
     assert rc == 0
-    out = (tmp_path / "flake-report.md").read_text()
+    out = (tmp_path / "flake-report.md").read_text(encoding="utf-8")
     assert "c::t" in out
     assert "Flake report" in capsys.readouterr().out
 
